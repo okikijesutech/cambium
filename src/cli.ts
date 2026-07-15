@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import * as path from "path";
+import * as fs from "fs";
 import { computeMetricsForSingleFile } from "./metrics";
 import { scanRepo, RepoFileMetrics } from "./scan-repo";
 import { analyzeDrift, LLMProvider, DriftAnalysis } from "./analyze-drift";
 import { loadDotEnv } from "./dotenv";
+import { formatScanReportMarkdown, formatDriftReportMarkdown } from "./report";
 
 loadDotEnv(path.join(__dirname, ".."));
 
@@ -87,11 +89,19 @@ program
   .description("Scan a repo for structural outliers (static metrics only, no LLM, no cost)")
   .argument("<repoPath>", "path to the repo root")
   .option("-n, --top <number>", "how many outliers to show", "25")
-  .action((repoPath: string, opts: { top: string }) => {
+  .option("-o, --output <path>", "save results as a markdown report to this file")
+  .action((repoPath: string, opts: { top: string; output?: string }) => {
     console.error(`Scanning ${repoPath} ...`);
     const results = scanRepo(repoPath);
     console.error(`Found ${results.length} file(s).`);
-    printOutlierTable(results, parseInt(opts.top, 10));
+    const limit = parseInt(opts.top, 10);
+    printOutlierTable(results, limit);
+
+    if (opts.output) {
+      const markdown = formatScanReportMarkdown(results, repoPath, limit);
+      fs.writeFileSync(opts.output, markdown, "utf-8");
+      console.error(`Report saved to ${opts.output}`);
+    }
   });
 
 program
@@ -112,10 +122,17 @@ program
     "skip files below this complexity AND below --min-lines",
     "8"
   )
+  .option("-o, --output <path>", "save results as a markdown report to this file")
   .action(
     async (
       repoPath: string,
-      opts: { top: string; json?: boolean; minLines: string; minComplexity: string }
+      opts: {
+        top: string;
+        json?: boolean;
+        minLines: string;
+        minComplexity: string;
+        output?: string;
+      }
     ) => {
       const provider = resolveProvider();
       console.error(
@@ -201,6 +218,12 @@ program
           }
         }
         console.log("");
+      }
+
+      if (opts.output) {
+        const markdown = formatDriftReportMarkdown(analyses, repoPath);
+        fs.writeFileSync(opts.output, markdown, "utf-8");
+        console.error(`Report saved to ${opts.output}`);
       }
     }
   );
