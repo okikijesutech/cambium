@@ -20,6 +20,7 @@ export interface DriftAnalysis {
     responsibility: string;
     movedExports: string[];
   }[] | null;
+  warnings: string[];
 }
 
 export type LLMProvider =
@@ -60,13 +61,27 @@ no preamble:
 
 If hasDrifted is false, suggestedSplit must be null.`;
 
+// Rough safety cap. ~4 chars/token is a common approximation; capping
+// source at ~24,000 chars (~6,000 tokens) leaves plenty of room for
+// the system prompt and output within a 16k context window, even for
+// very large files. Files this big are rare among your outliers anyway.
+const MAX_SOURCE_CHARS = 24000;
+
 function buildUserPrompt(filePath: string, exportedSymbols: string[], source: string): string {
+  let trimmedSource = source;
+  let truncationNote = "";
+
+  if (source.length > MAX_SOURCE_CHARS) {
+    trimmedSource = source.slice(0, MAX_SOURCE_CHARS);
+    truncationNote = `\n\n[TRUNCATED — file continues beyond this point. Base your analysis on what's shown; note in driftSummary that this was a partial read if it matters.]`;
+  }
+
   return `File path: ${filePath}
 Exported symbols: ${JSON.stringify(exportedSymbols)}
 
 Source:
 \`\`\`typescript
-${source}
+${trimmedSource}${truncationNote}
 \`\`\``;
 }
 
@@ -77,6 +92,69 @@ function parseModelJson(rawText: string): any {
   } catch (err) {
     throw new Error(`Failed to parse model response as JSON: ${rawText.slice(0, 300)}`);
   }
+}
+
+/**
+ * The model's qualitative read (what the responsibilities are, whether
+ * drift occurred) has proven reliable in testing. The mechanical part —
+ * assigning each symbol to exactly one destination file — is more
+ * error-prone. Catch the clearest failure mode: the same symbol name
+ * assigned to more than one suggested file, which isn't a valid split.
+ */
+function findDuplicateSymbolWarnings(
+  suggestedSplit: DriftAnalysis["suggestedSplit"]
+): string[] {
+  if (!suggestedSplit) return [];
+
+  const seenIn = new Map<string, string[]>(); // symbol -> file names it appears in
+
+  for (const entry of suggestedSplit) {
+    for (const symbol of entry.movedExports) {
+      const files = seenIn.get(symbol) ?? [];
+      files.push(entry.newFileName);
+      seenIn.set(symbol, files);
+    }
+  }
+
+  const warnings: string[] = [];
+  for (const [symbol, files] of seenIn) {
+    if (files.length > 1) {
+      warnings.push(
+        `"${symbol}" appears in multiple suggested files (${files.join(", ")}) — ` +
+          `treat this split as a starting point, not a ready-to-execute plan.`
+      );
+    }
+  }
+
+  return warnings;
+}
+
+function validateDriftAnalysis(parsed: any, rawText: string): Omit<DriftAnalysis, "filePath"> {
+  const required = [
+    "inferredOriginalPurpose",
+    "currentResponsibilities",
+    "hasDrifted",
+    "driftSummary",
+  ];
+  const missing = required.filter((key) => !(key in parsed));
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Model response missing field(s): ${missing.join(", ")}. ` +
+        `Raw response (first 500 chars): ${rawText.slice(0, 500)}`
+    );
+  }
+
+  const suggestedSplit = parsed.suggestedSplit ?? null;
+
+  return {
+    inferredOriginalPurpose: parsed.inferredOriginalPurpose,
+    currentResponsibilities: parsed.currentResponsibilities,
+    hasDrifted: parsed.hasDrifted,
+    driftSummary: parsed.driftSummary,
+    suggestedSplit,
+    warnings: findDuplicateSymbolWarnings(suggestedSplit),
+  };
 }
 
 async function callAnthropic(
@@ -112,14 +190,8 @@ async function callAnthropic(
   if (!textBlock) throw new Error("No text block in Claude response");
 
   const parsed = parseModelJson(textBlock.text);
-  return {
-    filePath,
-    inferredOriginalPurpose: parsed.inferredOriginalPurpose,
-    currentResponsibilities: parsed.currentResponsibilities,
-    hasDrifted: parsed.hasDrifted,
-    driftSummary: parsed.driftSummary,
-    suggestedSplit: parsed.suggestedSplit,
-  };
+  const validated = validateDriftAnalysis(parsed, textBlock.text);
+  return { filePath, ...validated };
 }
 
 /**
@@ -148,6 +220,18 @@ async function callOllama(
       ],
       stream: false,
       format: "json",
+      options: {
+        // Ollama defaults to a 2048-token context window, which is
+        // nowhere near enough for a large source file plus the system
+        // prompt — the model silently truncates and can return
+        // garbage/empty JSON instead of erroring. Raise it well above
+        // what a large TS file + prompt needs.
+        num_ctx: 16384,
+        // Cap generation length — our expected JSON output is modest,
+        // and an unbounded cap risks the model rambling/looping,
+        // which is likely part of why this took 35 minutes.
+        num_predict: 1200,
+      },
     }),
   });
 
@@ -164,14 +248,8 @@ async function callOllama(
   if (!rawText) throw new Error("No content in Ollama response");
 
   const parsed = parseModelJson(rawText);
-  return {
-    filePath,
-    inferredOriginalPurpose: parsed.inferredOriginalPurpose,
-    currentResponsibilities: parsed.currentResponsibilities,
-    hasDrifted: parsed.hasDrifted,
-    driftSummary: parsed.driftSummary,
-    suggestedSplit: parsed.suggestedSplit,
-  };
+  const validated = validateDriftAnalysis(parsed, rawText);
+  return { filePath, ...validated };
 }
 
 async function callLLM(
@@ -230,6 +308,7 @@ export async function analyzeDrift(
         hasDrifted: false,
         driftSummary: `Analysis failed: ${(err as Error).message}`,
         suggestedSplit: null,
+        warnings: [],
       });
     }
   }

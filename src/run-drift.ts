@@ -75,9 +75,25 @@ function outlierScore(m: { cyclomaticComplexity: number; lines: number; fanIn: n
 function printSummary(analyses: DriftAnalysis[]) {
   const drifted = analyses.filter((a) => a.hasDrifted).length;
   const errored = analyses.filter((a) => a.inferredOriginalPurpose === "ERROR").length;
+  const withWarnings = analyses.filter((a) => a.warnings.length > 0);
+
   console.error(
-    `\nSummary: ${analyses.length} file(s) analyzed, ${drifted} flagged as drifted, ${errored} failed.\n`
+    `\nSummary: ${analyses.length} file(s) analyzed, ${drifted} flagged as drifted, ${errored} failed.`
   );
+
+  if (withWarnings.length > 0) {
+    console.error(
+      `\n⚠ ${withWarnings.length} file(s) have suggested splits with issues — review before acting on them:`
+    );
+    for (const a of withWarnings) {
+      const shortName = a.filePath.split(/[\\/]/).pop();
+      console.error(`  ${shortName}:`);
+      for (const w of a.warnings) {
+        console.error(`    - ${w}`);
+      }
+    }
+  }
+  console.error("");
 }
 
 async function main() {
