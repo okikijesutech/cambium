@@ -129,7 +129,60 @@ function findDuplicateSymbolWarnings(
   return warnings;
 }
 
-function validateDriftAnalysis(parsed: any, rawText: string): Omit<DriftAnalysis, "filePath"> {
+/**
+ * Cross-check the model's suggested split against the file's ACTUAL
+ * exported symbols (computed by static analysis, not inferred by the
+ * model). The model reads the whole file and often names internal
+ * helper functions it noticed while reading — those aren't real
+ * exports and can't actually be "moved" the way the model implies.
+ *
+ * For files with zero real exports (common — e.g. closures with no
+ * module-level exports), every suggested symbol is by definition
+ * unverifiable, so we give one summary warning instead of spamming
+ * one line per symbol.
+ */
+function findUnknownSymbolWarnings(
+  suggestedSplit: DriftAnalysis["suggestedSplit"],
+  actualExportedSymbols: string[]
+): string[] {
+  if (!suggestedSplit) return [];
+
+  if (actualExportedSymbols.length === 0) {
+    const anySuggested = suggestedSplit.some((e) => e.movedExports.length > 0);
+    if (anySuggested) {
+      return [
+        `This file has no real exported symbols (everything is likely trapped in closures), ` +
+          `so the suggested symbol names below are the model's best guess from reading the code, ` +
+          `not verified exports — expect to rename/adjust when actually decomposing.`,
+      ];
+    }
+    return [];
+  }
+
+  const actualSet = new Set(actualExportedSymbols);
+  const unknown = new Set<string>();
+
+  for (const entry of suggestedSplit) {
+    for (const symbol of entry.movedExports) {
+      if (!actualSet.has(symbol)) {
+        unknown.add(symbol);
+      }
+    }
+  }
+
+  if (unknown.size === 0) return [];
+
+  return [
+    `${unknown.size} suggested symbol(s) don't match this file's actual exports and may be ` +
+      `inferred internal names: ${[...unknown].join(", ")}.`,
+  ];
+}
+
+function validateDriftAnalysis(
+  parsed: any,
+  rawText: string,
+  actualExportedSymbols: string[]
+): Omit<DriftAnalysis, "filePath"> {
   const required = [
     "inferredOriginalPurpose",
     "currentResponsibilities",
@@ -153,7 +206,10 @@ function validateDriftAnalysis(parsed: any, rawText: string): Omit<DriftAnalysis
     hasDrifted: parsed.hasDrifted,
     driftSummary: parsed.driftSummary,
     suggestedSplit,
-    warnings: findDuplicateSymbolWarnings(suggestedSplit),
+    warnings: [
+      ...findDuplicateSymbolWarnings(suggestedSplit),
+      ...findUnknownSymbolWarnings(suggestedSplit, actualExportedSymbols),
+    ],
   };
 }
 
@@ -190,7 +246,7 @@ async function callAnthropic(
   if (!textBlock) throw new Error("No text block in Claude response");
 
   const parsed = parseModelJson(textBlock.text);
-  const validated = validateDriftAnalysis(parsed, textBlock.text);
+  const validated = validateDriftAnalysis(parsed, textBlock.text, exportedSymbols);
   return { filePath, ...validated };
 }
 
@@ -248,7 +304,7 @@ async function callOllama(
   if (!rawText) throw new Error("No content in Ollama response");
 
   const parsed = parseModelJson(rawText);
-  const validated = validateDriftAnalysis(parsed, rawText);
+  const validated = validateDriftAnalysis(parsed, rawText, exportedSymbols);
   return { filePath, ...validated };
 }
 
