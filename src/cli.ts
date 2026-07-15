@@ -7,6 +7,8 @@ import { scanRepo, RepoFileMetrics } from "./scan-repo";
 import { analyzeDrift, LLMProvider, DriftAnalysis } from "./analyze-drift";
 import { loadDotEnv } from "./dotenv";
 import { formatScanReportMarkdown, formatDriftReportMarkdown } from "./report";
+import { computeOutlierScore, attachTouchFrequency, ScoredFileMetrics } from "./scoring";
+import { getTouchFrequency } from "./git-history";
 
 loadDotEnv(path.join(__dirname, ".."));
 
@@ -19,13 +21,12 @@ program
   )
   .version("0.1.0");
 
-function outlierScore(m: { cyclomaticComplexity: number; lines: number; fanIn: number }): number {
-  return m.cyclomaticComplexity * 2 + m.lines * 0.1 + m.fanIn * 3;
-}
-
-function printOutlierTable(results: RepoFileMetrics[], limit: number) {
-  const sorted = [...results].sort((a, b) => outlierScore(b) - outlierScore(a));
+function printOutlierTable(results: ScoredFileMetrics[], limit: number) {
+  const sorted = [...results].sort(
+    (a, b) => computeOutlierScore(b) - computeOutlierScore(a)
+  );
   const top = sorted.slice(0, limit);
+  const hasTouchData = results.some((m) => m.touchCount != null);
 
   console.log(
     `\nTop ${top.length} outlier(s) of ${results.length} file(s) scanned:\n`
@@ -33,14 +34,19 @@ function printOutlierTable(results: RepoFileMetrics[], limit: number) {
 
   for (const m of top) {
     const shortPath = m.filePath.split(/[\\/]/).slice(-3).join("/");
+    const touchPart = hasTouchData ? `touches=${m.touchCount ?? "?"}  ` : "";
     console.log(
-      `  ${Math.round(outlierScore(m)).toString().padStart(5)}  ` +
+      `  ${Math.round(computeOutlierScore(m)).toString().padStart(5)}  ` +
         `complexity=${m.cyclomaticComplexity}  lines=${m.lines}  ` +
-        `fanIn=${m.fanIn}  exports=${m.exportedSymbols.length}  ${shortPath}`
+        `fanIn=${m.fanIn}  ${touchPart}exports=${m.exportedSymbols.length}  ${shortPath}`
     );
+  }
+  if (!hasTouchData) {
+    console.log(`  (no git history found — touch-frequency signal unavailable)`);
   }
   console.log("");
 }
+
 
 function resolveProvider(): LLMProvider {
   const forced = process.env.LLM_PROVIDER; // "anthropic" | "ollama"
@@ -92,8 +98,12 @@ program
   .option("-o, --output <path>", "save results as a markdown report to this file")
   .action((repoPath: string, opts: { top: string; output?: string }) => {
     console.error(`Scanning ${repoPath} ...`);
-    const results = scanRepo(repoPath);
-    console.error(`Found ${results.length} file(s).`);
+    const rawResults = scanRepo(repoPath);
+    console.error(`Found ${rawResults.length} file(s).`);
+
+    const touchFrequency = getTouchFrequency(repoPath);
+    const results = attachTouchFrequency(rawResults, touchFrequency);
+
     const limit = parseInt(opts.top, 10);
     printOutlierTable(results, limit);
 
@@ -141,10 +151,18 @@ program
       );
       console.error(`Scanning ${repoPath} ...`);
 
-      const results = scanRepo(repoPath);
-      console.error(`Found ${results.length} file(s).`);
+      const rawResults = scanRepo(repoPath);
+      console.error(`Found ${rawResults.length} file(s).`);
 
-      const sorted = [...results].sort((a, b) => outlierScore(b) - outlierScore(a));
+      const touchFrequency = getTouchFrequency(repoPath);
+      if (touchFrequency === null) {
+        console.error(`(no git history found — touch-frequency signal unavailable)`);
+      }
+      const results = attachTouchFrequency(rawResults, touchFrequency);
+
+      const sorted = [...results].sort(
+        (a, b) => computeOutlierScore(b) - computeOutlierScore(a)
+      );
       const candidates = sorted.slice(0, parseInt(opts.top, 10));
 
       const minLines = parseInt(opts.minLines, 10);

@@ -1,22 +1,21 @@
-import { RepoFileMetrics } from "./scan-repo";
+import { ScoredFileMetrics, computeOutlierScore } from "./scoring";
 import { DriftAnalysis } from "./analyze-drift";
 
 function shortPath(filePath: string, segments = 3): string {
   return filePath.split(/[\\/]/).slice(-segments).join("/");
 }
 
-function outlierScore(m: { cyclomaticComplexity: number; lines: number; fanIn: number }): number {
-  return m.cyclomaticComplexity * 2 + m.lines * 0.1 + m.fanIn * 3;
-}
-
 export function formatScanReportMarkdown(
-  results: RepoFileMetrics[],
+  results: ScoredFileMetrics[],
   repoPath: string,
   limit: number
 ): string {
-  const sorted = [...results].sort((a, b) => outlierScore(b) - outlierScore(a));
+  const sorted = [...results].sort(
+    (a, b) => computeOutlierScore(b) - computeOutlierScore(a)
+  );
   const top = sorted.slice(0, limit);
   const timestamp = new Date().toISOString();
+  const hasTouchData = results.some((m) => m.touchCount != null);
 
   const lines: string[] = [];
   lines.push(`# Cambium Scan Report`);
@@ -25,21 +24,39 @@ export function formatScanReportMarkdown(
   lines.push(`- **Generated:** ${timestamp}`);
   lines.push(`- **Files scanned:** ${results.length}`);
   lines.push(``);
-  lines.push(`| Score | Complexity | Lines | Fan-in | Exports | File |`);
-  lines.push(`|---|---|---|---|---|---|`);
+
+  if (hasTouchData) {
+    lines.push(`| Score | Complexity | Lines | Fan-in | Touches | Exports | File |`);
+    lines.push(`|---|---|---|---|---|---|---|`);
+  } else {
+    lines.push(`| Score | Complexity | Lines | Fan-in | Exports | File |`);
+    lines.push(`|---|---|---|---|---|---|`);
+  }
 
   for (const m of top) {
-    lines.push(
-      `| ${Math.round(outlierScore(m))} | ${m.cyclomaticComplexity} | ${m.lines} | ` +
-        `${m.fanIn} | ${m.exportedSymbols.length} | \`${shortPath(m.filePath)}\` |`
-    );
+    if (hasTouchData) {
+      lines.push(
+        `| ${Math.round(computeOutlierScore(m))} | ${m.cyclomaticComplexity} | ${m.lines} | ` +
+          `${m.fanIn} | ${m.touchCount ?? "?"} | ${m.exportedSymbols.length} | \`${shortPath(m.filePath)}\` |`
+      );
+    } else {
+      lines.push(
+        `| ${Math.round(computeOutlierScore(m))} | ${m.cyclomaticComplexity} | ${m.lines} | ` +
+          `${m.fanIn} | ${m.exportedSymbols.length} | \`${shortPath(m.filePath)}\` |`
+      );
+    }
   }
 
   lines.push(``);
   lines.push(
-    `*Score = complexity × 2 + lines × 0.1 + fan-in × 3. Higher means more structurally ` +
-      `risky — worth a closer look, not necessarily "broken."*`
+    `*Score = complexity × 2 + lines × 0.1 + fan-in × 3` +
+      (hasTouchData ? ` + touches × 2` : ``) +
+      `. Higher means more structurally risky — worth a closer look, not necessarily "broken."*`
   );
+  if (!hasTouchData) {
+    lines.push(``);
+    lines.push(`*No git history found — touch-frequency signal unavailable for this repo.*`);
+  }
 
   return lines.join("\n");
 }
