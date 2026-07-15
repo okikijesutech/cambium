@@ -1,4 +1,5 @@
 import { RepoFileMetrics } from "./scan-repo";
+import { normalizePathKey } from "./git-history";
 
 export interface ScoredFileMetrics extends RepoFileMetrics {
   touchCount: number | null; // null when git history isn't available
@@ -34,6 +35,8 @@ export function attachTouchFrequency(
 ): ScoredFileMetrics[] {
   return results.map((m) => ({
     ...m,
-    touchCount: touchFrequency ? touchFrequency.get(m.filePath) ?? 0 : null,
+    touchCount: touchFrequency
+      ? touchFrequency.get(normalizePathKey(m.filePath)) ?? 0
+      : null,
   }));
 }

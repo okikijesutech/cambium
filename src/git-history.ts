@@ -16,6 +16,18 @@ import * as path from "path";
  * means this signal isn't available, caller should degrade gracefully).
  */
 /**
+ * Windows filesystems (NTFS) are case-insensitive, but JS Map/string
+ * comparisons are not. git's toplevel path and ts-morph's resolved
+ * absolute paths can end up differently-cased depending on how the
+ * user typed the path on the command line, causing every lookup to
+ * silently miss on Windows even though the paths refer to the same
+ * file. Normalize case for matching purposes only, on Windows.
+ */
+export function normalizePathKey(p: string): string {
+  return process.platform === "win32" ? p.toLowerCase() : p;
+}
+
+/**
  * Git Bash (MINGW64) on Windows often returns POSIX-style paths from
  * `git rev-parse --show-toplevel` — e.g. /c/Users/HP/desktop/pwmngerTS
  * instead of C:/Users/HP/desktop/pwmngerTS. Node's path module on
@@ -70,7 +82,8 @@ export function getTouchFrequency(repoPath: string): Map<string, number> | null 
     // was passed in as repoPath — resolving against repoPath directly
     // silently breaks whenever repoPath is a subdirectory of the repo.
     const absolute = path.resolve(gitRoot, line).replace(/\\/g, "/");
-    counts.set(absolute, (counts.get(absolute) ?? 0) + 1);
+    const key = normalizePathKey(absolute);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
   }
 
   return counts;
