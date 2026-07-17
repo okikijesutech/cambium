@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [1.1.0]
+### Added
+- `cambium check <file>` — fast, LLM-free pass/fail check for a single
+  file, designed for git hooks and CI
+- `cambium install-hook [repoPath]` — installs a git pre-commit hook
+  that runs `cambium check` on every staged `.ts`/`.tsx` file, warn-only
+  by default, `--strict` to actually block commits
+- Quick-start examples and a per-command help pointer added to
+  `cambium --help`
+### Fixed
+- `cambium -V` was hardcoded to `0.1.0` and had gone stale (actual
+  version was already 1.0.0); now reads dynamically from `package.json`
+  so this can't happen again
+- LLM calls (both Ollama and Anthropic) now use `temperature: 0`
+  (plus a fixed seed for Ollama) — same file should get the same
+  verdict run to run, rather than sampling randomly. Reduces but
+  doesn't eliminate variance on genuinely borderline files.
+
 ## [1.0.0]
 ### Added
 - LICENSE (ISC) and this changelog

@@ -132,6 +132,40 @@ Metrics for a single file.
 cambium file src/some-module.ts
 ```
 
+### `cambium check <filePath>`
+
+Fast pass/fail check for a single file — no LLM, no repo scan. Warns
+(or fails, with `--strict`) if the file has grown big and complex
+enough to warrant a real look. This is the primitive the git hook
+below is built on; it's also useful standalone in CI.
+
+```bash
+cambium check src/some-module.ts
+cambium check src/some-module.ts --strict   # exits non-zero if flagged
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--min-lines <number>` | `80` | flag threshold for line count |
+| `--min-complexity <number>` | `8` | flag threshold for complexity |
+| `--strict` | off | exit non-zero when flagged, instead of warning only |
+
+### `cambium install-hook [repoPath]`
+
+Installs a git pre-commit hook that runs `cambium check` on every
+staged `.ts`/`.tsx` file — the connection between "an AI agent (or a
+human) just wrote code" and "Cambium looks at it," regardless of what
+wrote it or which editor/tool was used.
+
+```bash
+cambium install-hook .              # warn-only, never blocks commits
+cambium install-hook . --strict     # blocks commits on flagged files
+```
+
+Warn mode (the default) prints a warning but always lets the commit
+through. Strict mode actually blocks the commit (bypass anytime with
+`git commit --no-verify`). Uninstall by deleting `.git/hooks/pre-commit`.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and fill in what you need — loaded
@@ -170,6 +204,17 @@ manually in your shell takes priority over `.env`.
 
 Treat `suggestedSplit` as a starting point for your own judgment,
 especially when `warnings` is non-empty — not a ready-to-execute plan.
+
+**On consistency between runs:** both providers are called with
+`temperature: 0` (and a fixed seed for Ollama) so the same file
+should get the same verdict run to run. This makes results far more
+consistent, not perfectly deterministic — some backends still have
+minor floating-point variance under parallel execution. If a file's
+`hasDrifted` verdict flips between runs, that's usually a sign the
+file is genuinely borderline (its responsibilities are close to
+coherent, not clearly one thing or clearly several) rather than a
+bug — worth applying your own judgment on files like that rather than
+trusting either verdict outright.
 
 ## Development
 
@@ -215,6 +260,9 @@ build.
 - Published to npm registry (`npm install -g cambium`) — not yet published
 - Touch-frequency + LLM context (currently two separate signals, not
   yet combined into the drift-explanation prompt)
+- `cambium watch` — background file-watching, closer to real-time than
+  the commit-time hook (deferred until there's evidence commit-time
+  isn't fast enough)
 
 ## License
 

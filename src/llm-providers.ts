@@ -27,6 +27,7 @@ async function callAnthropic(
     body: JSON.stringify({
       model: provider.model ?? "claude-sonnet-5",
       max_tokens: 1500,
+      temperature: 0,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userPrompt }],
     }),
@@ -82,6 +83,13 @@ async function callOllama(
         // Cap generation length — our expected JSON output is modest,
         // and an unbounded cap risks the model rambling/looping.
         num_predict: 1200,
+        // Default temperature samples randomly, so the same file can
+        // get a different verdict on different runs — most visible on
+        // genuinely borderline files where the "right" answer is close
+        // to a coin flip. temperature 0 + a fixed seed makes output
+        // repeatable: same file in, same analysis out, every time.
+        temperature: 0,
+        seed: 42,
       },
     }),
   });
