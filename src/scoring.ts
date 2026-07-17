@@ -1,5 +1,5 @@
 import { RepoFileMetrics } from "./scan-repo";
-import { normalizePathKey } from "./git-history";
+import { normalizePathKey } from "./git-paths";
 
 export interface ScoredFileMetrics extends RepoFileMetrics {
   touchCount: number | null; // null when git history isn't available
