@@ -1,3 +1,9 @@
+// NOTE: cambium drift has flagged this file as "drifted" across three
+// separate runs, suggesting a split into report-scan.ts/report-drift.ts.
+// Deliberately not split: both functions share the same output shape,
+// same consumers, and same reason to change together — splitting would
+// cost more (two files to jump between for one concern: "how do we
+// format a report") than it buys. Judgment call, not an oversight.
 import { ScoredFileMetrics, computeOutlierScore } from "./scoring";
 import { DriftAnalysis } from "./analyze-drift";
 
