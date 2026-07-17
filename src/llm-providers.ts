@@ -13,9 +13,10 @@ async function callAnthropic(
   provider: { apiKey: string; model?: string },
   filePath: string,
   exportedSymbols: string[],
-  source: string
+  source: string,
+  touchCount: number | null
 ): Promise<DriftAnalysis> {
-  const userPrompt = buildUserPrompt(filePath, exportedSymbols, source);
+  const userPrompt = buildUserPrompt(filePath, exportedSymbols, source, touchCount);
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -56,9 +57,10 @@ async function callOllama(
   provider: { baseUrl?: string; model?: string },
   filePath: string,
   exportedSymbols: string[],
-  source: string
+  source: string,
+  touchCount: number | null
 ): Promise<DriftAnalysis> {
-  const userPrompt = buildUserPrompt(filePath, exportedSymbols, source);
+  const userPrompt = buildUserPrompt(filePath, exportedSymbols, source, touchCount);
   const baseUrl = provider.baseUrl ?? "http://127.0.0.1:11434";
   const model = provider.model ?? "qwen2.5-coder:latest";
 
@@ -115,10 +117,11 @@ export async function callLLM(
   provider: LLMProvider,
   filePath: string,
   exportedSymbols: string[],
-  source: string
+  source: string,
+  touchCount: number | null
 ): Promise<DriftAnalysis> {
   if (provider.kind === "anthropic") {
-    return callAnthropic(provider, filePath, exportedSymbols, source);
+    return callAnthropic(provider, filePath, exportedSymbols, source, touchCount);
   }
-  return callOllama(provider, filePath, exportedSymbols, source);
+  return callOllama(provider, filePath, exportedSymbols, source, touchCount);
 }
