@@ -1,6 +1,6 @@
 {
   "name": "cambium",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Structural drift detection for AI-assisted codebases — catches modules whose scope has outgrown their original design, before they calcify into a rewrite.",
   "main": "dist/cli.js",
   "bin": {
