@@ -45,7 +45,8 @@ export async function analyzeDrift(
         file.filePath,
         file.exportedSymbols,
         source,
-        file.touchCount
+        file.touchCount,
+        file.importedSymbolNames
       );
       results.push(analysis);
       process.stderr.write(`done (${formatElapsed(Date.now() - started)})\n`);

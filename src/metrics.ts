@@ -7,6 +7,7 @@ export interface FileMetrics {
   exportedSymbols: string[];
   importCount: number;
   importedFrom: string[]; // module specifiers this file imports from
+  importedSymbolNames: string[]; // named symbols imported INTO this file from elsewhere
 }
 
 /**
@@ -71,13 +72,26 @@ function getExportedSymbols(sourceFile: SourceFile): string[] {
 function getImportInfo(sourceFile: SourceFile): {
   importCount: number;
   importedFrom: string[];
+  importedSymbolNames: string[];
 } {
   const importDecls = sourceFile.getImportDeclarations();
   const importedFrom = importDecls.map((d) => d.getModuleSpecifierValue());
 
+  const importedSymbolNames: string[] = [];
+  for (const decl of importDecls) {
+    for (const named of decl.getNamedImports()) {
+      importedSymbolNames.push(named.getName());
+    }
+    const defaultImport = decl.getDefaultImport();
+    if (defaultImport) importedSymbolNames.push(defaultImport.getText());
+    const namespaceImport = decl.getNamespaceImport();
+    if (namespaceImport) importedSymbolNames.push(namespaceImport.getText());
+  }
+
   return {
     importCount: importDecls.length,
     importedFrom,
+    importedSymbolNames,
   };
 }
 
@@ -92,7 +106,7 @@ export function computeFileMetrics(
 ): FileMetrics {
   const sourceFile = project.getSourceFileOrThrow(filePath);
 
-  const { importCount, importedFrom } = getImportInfo(sourceFile);
+  const { importCount, importedFrom, importedSymbolNames } = getImportInfo(sourceFile);
 
   return {
     filePath,
@@ -101,6 +115,7 @@ export function computeFileMetrics(
     exportedSymbols: getExportedSymbols(sourceFile),
     importCount,
     importedFrom,
+    importedSymbolNames,
   };
 }
 

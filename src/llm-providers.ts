@@ -14,7 +14,8 @@ async function callAnthropic(
   filePath: string,
   exportedSymbols: string[],
   source: string,
-  touchCount: number | null
+  touchCount: number | null,
+  importedSymbolNames: string[]
 ): Promise<DriftAnalysis> {
   const userPrompt = buildUserPrompt(filePath, exportedSymbols, source, touchCount);
 
@@ -44,7 +45,7 @@ async function callAnthropic(
   if (!textBlock) throw new Error("No text block in Claude response");
 
   const parsed = parseModelJson(textBlock.text);
-  const validated = validateDriftAnalysis(parsed, textBlock.text, exportedSymbols);
+  const validated = validateDriftAnalysis(parsed, textBlock.text, exportedSymbols, importedSymbolNames);
   return { filePath, ...validated };
 }
 
@@ -58,7 +59,8 @@ async function callOllama(
   filePath: string,
   exportedSymbols: string[],
   source: string,
-  touchCount: number | null
+  touchCount: number | null,
+  importedSymbolNames: string[]
 ): Promise<DriftAnalysis> {
   const userPrompt = buildUserPrompt(filePath, exportedSymbols, source, touchCount);
   const baseUrl = provider.baseUrl ?? "http://127.0.0.1:11434";
@@ -109,7 +111,7 @@ async function callOllama(
   if (!rawText) throw new Error("No content in Ollama response");
 
   const parsed = parseModelJson(rawText);
-  const validated = validateDriftAnalysis(parsed, rawText, exportedSymbols);
+  const validated = validateDriftAnalysis(parsed, rawText, exportedSymbols, importedSymbolNames);
   return { filePath, ...validated };
 }
 
@@ -118,10 +120,11 @@ export async function callLLM(
   filePath: string,
   exportedSymbols: string[],
   source: string,
-  touchCount: number | null
+  touchCount: number | null,
+  importedSymbolNames: string[]
 ): Promise<DriftAnalysis> {
   if (provider.kind === "anthropic") {
-    return callAnthropic(provider, filePath, exportedSymbols, source, touchCount);
+    return callAnthropic(provider, filePath, exportedSymbols, source, touchCount, importedSymbolNames);
   }
-  return callOllama(provider, filePath, exportedSymbols, source, touchCount);
+  return callOllama(provider, filePath, exportedSymbols, source, touchCount, importedSymbolNames);
 }

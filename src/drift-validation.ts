@@ -47,9 +47,18 @@ function findDuplicateSymbolWarnings(
 /**
  * Cross-check the model's suggested split against the file's ACTUAL
  * exported symbols (computed by static analysis, not inferred by the
- * model). The model reads the whole file and often names internal
- * helper functions it noticed while reading — those aren't real
- * exports and can't actually be "moved" the way the model implies.
+ * model). Two distinct failure modes get different treatment:
+ *
+ * 1. The symbol is IMPORTED into this file from elsewhere, not
+ *    defined here at all. This is a more serious confusion than #2 —
+ *    the model is suggesting to "move" code that isn't this file's
+ *    own logic in the first place (e.g. it saw `import { analyzeDrift }
+ *    from "../analyze-drift"` used in this file and suggested moving
+ *    analyzeDrift out of THIS file, when it was never here).
+ * 2. The symbol matches neither an export nor an import — most likely
+ *    a real but unexported local helper the model noticed while
+ *    reading. Lower-severity: it's this file's own code, just not
+ *    exported yet.
  *
  * For files with zero real exports (common — e.g. closures with no
  * module-level exports), every suggested symbol is by definition
@@ -58,7 +67,8 @@ function findDuplicateSymbolWarnings(
  */
 function findUnknownSymbolWarnings(
   suggestedSplit: DriftAnalysis["suggestedSplit"],
-  actualExportedSymbols: string[]
+  actualExportedSymbols: string[],
+  importedSymbolNames: string[]
 ): string[] {
   if (!suggestedSplit) return [];
 
@@ -75,28 +85,48 @@ function findUnknownSymbolWarnings(
   }
 
   const actualSet = new Set(actualExportedSymbols);
-  const unknown = new Set<string>();
+  const importedSet = new Set(importedSymbolNames);
+
+  const importedNotDefined = new Set<string>();
+  const unverifiedLocal = new Set<string>();
 
   for (const entry of suggestedSplit) {
     for (const symbol of entry.movedExports) {
-      if (!actualSet.has(symbol)) {
-        unknown.add(symbol);
+      if (actualSet.has(symbol)) continue;
+
+      if (importedSet.has(symbol)) {
+        importedNotDefined.add(symbol);
+      } else {
+        unverifiedLocal.add(symbol);
       }
     }
   }
 
-  if (unknown.size === 0) return [];
+  const warnings: string[] = [];
 
-  return [
-    `${unknown.size} suggested symbol(s) don't match this file's actual exports and may be ` +
-      `inferred internal names: ${[...unknown].join(", ")}.`,
-  ];
+  if (importedNotDefined.size > 0) {
+    warnings.push(
+      `${importedNotDefined.size} suggested symbol(s) are IMPORTED into this file from ` +
+        `elsewhere, not defined here — this file doesn't actually own this code, so it ` +
+        `can't be "moved" out of it: ${[...importedNotDefined].join(", ")}.`
+    );
+  }
+
+  if (unverifiedLocal.size > 0) {
+    warnings.push(
+      `${unverifiedLocal.size} suggested symbol(s) don't match this file's actual exports and ` +
+        `may be unexported internal names: ${[...unverifiedLocal].join(", ")}.`
+    );
+  }
+
+  return warnings;
 }
 
 export function validateDriftAnalysis(
   parsed: any,
   rawText: string,
-  actualExportedSymbols: string[]
+  actualExportedSymbols: string[],
+  importedSymbolNames: string[]
 ): Omit<DriftAnalysis, "filePath"> {
   const required = [
     "inferredOriginalPurpose",
@@ -123,7 +153,7 @@ export function validateDriftAnalysis(
     suggestedSplit,
     warnings: [
       ...findDuplicateSymbolWarnings(suggestedSplit),
-      ...findUnknownSymbolWarnings(suggestedSplit, actualExportedSymbols),
+      ...findUnknownSymbolWarnings(suggestedSplit, actualExportedSymbols, importedSymbolNames),
     ],
   };
 }
