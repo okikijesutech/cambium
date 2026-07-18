@@ -27,6 +27,13 @@ tuned parameters in a small security-critical function). Do not treat touch
 count as its own drift signal in isolation; only let it strengthen or weaken
 a judgment you've already formed from the responsibilities themselves.
 
+CRITICAL: only describe responsibilities based on logic actually DEFINED in
+this file's source. If this file imports a function from another file and
+calls it, that is a DEPENDENCY, not a responsibility of this file — do not
+list "formatting reports" as one of this file's responsibilities just
+because it imports and calls a report-formatting function written elsewhere.
+Only count work that is implemented here.
+
 Respond with ONLY valid JSON matching this exact shape, no markdown fences,
 no preamble:
 
