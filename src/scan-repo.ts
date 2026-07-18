@@ -1,5 +1,6 @@
 import { Project } from "ts-morph";
 import * as path from "path";
+import * as fs from "fs";
 import { computeFileMetrics, FileMetrics } from "./metrics";
 
 export interface RepoFileMetrics extends FileMetrics {
@@ -20,8 +21,19 @@ const DEFAULT_IGNORE = [
  * Walk a repo root, parse every .ts/.tsx file into one shared ts-morph
  * Project (needed so fan-in resolution can see the whole module graph),
  * and return per-file metrics including fan-in.
+ *
+ * Throws if repoRoot doesn't exist or isn't a directory — without this,
+ * a typo'd path silently returns an empty result identical to a
+ * legitimately empty repo, with no way to tell the two apart.
  */
 export function scanRepo(repoRoot: string): RepoFileMetrics[] {
+  if (!fs.existsSync(repoRoot)) {
+    throw new Error(`Path does not exist: ${repoRoot}`);
+  }
+  if (!fs.statSync(repoRoot).isDirectory()) {
+    throw new Error(`Path is not a directory: ${repoRoot}`);
+  }
+
   const project = new Project({
     skipAddingFilesFromTsConfig: true,
   });

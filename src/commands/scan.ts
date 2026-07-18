@@ -19,14 +19,24 @@ function printOutlierTable(results: ScoredFileMetrics[], limit: number) {
   for (const m of top) {
     const shortPath = m.filePath.split(/[\\/]/).slice(-3).join("/");
     const touchPart = hasTouchData ? `touches=${m.touchCount ?? "?"}  ` : "";
+    const syntaxWarning = m.hasSyntaxErrors ? "⚠ SYNTAX ERROR — numbers below are unreliable  " : "";
     console.log(
       `  ${Math.round(computeOutlierScore(m)).toString().padStart(5)}  ` +
-        `complexity=${m.cyclomaticComplexity}  lines=${m.lines}  ` +
+        `${syntaxWarning}complexity=${m.cyclomaticComplexity}  lines=${m.lines}  ` +
         `fanIn=${m.fanIn}  ${touchPart}exports=${m.exportedSymbols.length}  ${shortPath}`
     );
   }
   if (!hasTouchData) {
     console.log(`  (no git history found — touch-frequency signal unavailable)`);
+  }
+
+  const brokenCount = results.filter((m) => m.hasSyntaxErrors).length;
+  if (brokenCount > 0) {
+    console.log(
+      `  ⚠ ${brokenCount} file(s) in this repo have syntax errors and couldn't be ` +
+        `parsed correctly — their metrics above are not trustworthy. Fix the syntax ` +
+        `before trusting any score for those files.`
+    );
   }
   console.log("");
 }
@@ -40,7 +50,13 @@ export function registerScanCommand(program: Command): void {
     .option("-o, --output <path>", "save results as a markdown report to this file")
     .action((repoPath: string, opts: { top: string; output?: string }) => {
       console.error(`Scanning ${repoPath} ...`);
-      const rawResults = scanRepo(repoPath);
+      let rawResults;
+      try {
+        rawResults = scanRepo(repoPath);
+      } catch (err) {
+        console.error(`Error: ${(err as Error).message}`);
+        process.exit(1);
+      }
       console.error(`Found ${rawResults.length} file(s).`);
 
       const touchFrequency = getTouchFrequency(repoPath);

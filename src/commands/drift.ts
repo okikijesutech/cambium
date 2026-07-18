@@ -46,6 +46,18 @@ function printDriftSummary(analyses: DriftAnalysis[]) {
     }
   }
   console.error("");
+
+  // A per-file failure is already reported as an ERROR entry (graceful
+  // degradation is correct). But if EVERY file failed, the command
+  // itself did not do its job — exit non-zero so scripts/CI checking
+  // only the exit code don't mistake this for a successful run with
+  // zero drifted files.
+  if (analyses.length > 0 && errored === analyses.length) {
+    console.error(
+      `⚠ All ${errored} file(s) failed analysis — treating this run as failed (exit code 1).\n`
+    );
+    process.exitCode = 1;
+  }
 }
 
 export function registerDriftCommand(program: Command): void {
@@ -86,7 +98,13 @@ export function registerDriftCommand(program: Command): void {
         );
         console.error(`Scanning ${repoPath} ...`);
 
-        const rawResults = scanRepo(repoPath);
+        let rawResults;
+        try {
+          rawResults = scanRepo(repoPath);
+        } catch (err) {
+          console.error(`Error: ${(err as Error).message}`);
+          process.exit(1);
+        }
         console.error(`Found ${rawResults.length} file(s).`);
 
         const touchFrequency = getTouchFrequency(repoPath);
@@ -95,7 +113,20 @@ export function registerDriftCommand(program: Command): void {
         }
         const results = attachTouchFrequency(rawResults, touchFrequency);
 
-        const sorted = [...results].sort(
+        const brokenFiles = results.filter((m) => m.hasSyntaxErrors);
+        if (brokenFiles.length > 0) {
+          console.error(
+            `\n⚠ Excluding ${brokenFiles.length} file(s) with syntax errors — their metrics ` +
+              `aren't trustworthy, so they're not eligible for drift analysis:`
+          );
+          for (const m of brokenFiles) {
+            const shortName = m.filePath.split(/[\\/]/).pop();
+            console.error(`  - ${shortName}`);
+          }
+        }
+        const parseable = results.filter((m) => !m.hasSyntaxErrors);
+
+        const sorted = [...parseable].sort(
           (a, b) => computeOutlierScore(b) - computeOutlierScore(a)
         );
         const candidates = sorted.slice(0, parseInt(opts.top, 10));

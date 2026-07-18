@@ -8,6 +8,8 @@ export interface FileMetrics {
   importCount: number;
   importedFrom: string[]; // module specifiers this file imports from
   importedSymbolNames: string[]; // named symbols imported INTO this file from elsewhere
+  hasSyntaxErrors: boolean; // true if the file doesn't actually parse as valid TS —
+                            // all other numbers on this file are unreliable when true
 }
 
 /**
@@ -57,6 +59,22 @@ function computeCyclomaticComplexity(sourceFile: SourceFile): number {
   });
 
   return complexity;
+}
+
+/**
+ * TypeScript's parser is deliberately error-tolerant — it always
+ * produces SOME AST even from genuinely broken code, which means
+ * every other metric in this file (complexity, exports, imports)
+ * would otherwise be silently computed from garbage with zero
+ * indication anything was wrong. This checks SYNTAX-only diagnostics
+ * (not semantic/type diagnostics — those fire constantly on valid
+ * code parsed without full project type context, e.g. "cannot find
+ * name 'path'", and would be false positives here).
+ */
+function hasSyntaxErrors(project: Project, sourceFile: SourceFile): boolean {
+  const program = project.getProgram().compilerObject;
+  const syntaxDiagnostics = program.getSyntacticDiagnostics(sourceFile.compilerNode);
+  return syntaxDiagnostics.length > 0;
 }
 
 function getExportedSymbols(sourceFile: SourceFile): string[] {
@@ -116,6 +134,7 @@ export function computeFileMetrics(
     importCount,
     importedFrom,
     importedSymbolNames,
+    hasSyntaxErrors: hasSyntaxErrors(project, sourceFile),
   };
 }
 
