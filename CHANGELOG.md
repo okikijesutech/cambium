@@ -2,6 +2,54 @@
 
 ## [Unreleased]
 
+## [1.2.0]
+### Added
+- Touch-frequency now feeds into the LLM drift prompt, with explicit
+  calibration guidance (a high touch count only reinforces a drift
+  verdict already formed from the file's responsibilities — it's not
+  a standalone signal on its own, since careful iteration on a small
+  file isn't the same thing as scope creep)
+- `metrics.ts` now tracks `importedSymbolNames` alongside
+  `exportedSymbols`, enabling a sharper guardrail: suggested symbols
+  that are genuinely imported from elsewhere (not owned by the file
+  at all) now get a distinct, more accurate warning than symbols that
+  are merely unexported local helpers
+- `hasSyntaxErrors` detection (via TypeScript's syntax-only
+  diagnostics) — files that don't actually parse as valid TypeScript
+  no longer get silently assigned confident-looking, wrong metrics
+### Changed
+- `cli.ts` decomposed into `src/commands/{scan,drift,file,check,install-hook}.ts`
+  (was complexity 38, 372 lines, flagged as drifted across multiple
+  `cambium drift` runs against its own source) — now complexity 1,
+  49 lines, pure command-registration wiring
+### Fixed (silent-failure audit — six bugs found via deliberate testing)
+- Syntax-broken files: excluded from `drift`'s LLM analysis and
+  flagged with a clear warning in `scan`, instead of silently
+  reporting wrong numbers as fact
+- A typo'd repo path returned identical output to a legitimately
+  empty repo ("Found 0 files", exit 0) — `scanRepo` now validates the
+  path exists first and fails loudly if not
+- `file`/`check` commands crashed with a raw internal stack trace on
+  a nonexistent path instead of a clean error message
+- `drift` always exited 0 even when every file's LLM analysis
+  failed — a script/CI checking only exit code would mistake total
+  failure for a clean, zero-drift run. Now exits 1 when 100% fail
+- The LLM could report `hasDrifted: false` while still returning a
+  non-empty `suggestedSplit` — contradictory, and would render as
+  "Drifted: no" immediately followed by a "Suggested split:" section.
+  Now detected; the split is suppressed (not-drifted takes
+  precedence) and a warning is added either direction
+- `git` not being installed at all was silently indistinguishable
+  from "this folder just isn't a git repo" — both collapsed to the
+  same silent `null`, but the former breaks touch-frequency for every
+  repo, not just one. Now distinguished via exit status 127 vs 128,
+  with a one-time warning for the former
+- An import-misattribution bug in the drift prompt: the model would
+  sometimes claim a file was responsible for logic it merely imported
+  and called (e.g. claiming `cli.ts` did "report formatting" because
+  it imported a formatting function from `report.ts`). System prompt
+  now explicitly distinguishes dependencies from responsibilities
+
 ## [1.1.0]
 ### Added
 - `cambium check <file>` — fast, LLM-free pass/fail check for a single

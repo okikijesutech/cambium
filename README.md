@@ -256,10 +256,11 @@ build.
 
 ## Roadmap
 
-- Onboarding scan mode for brownfield repos (baseline + drift-from-here)
-- Published to npm registry (`npm install -g cambium`) — not yet published
-- Touch-frequency + LLM context (currently two separate signals, not
-  yet combined into the drift-explanation prompt)
+- Onboarding scan mode for brownfield repos (baseline + drift-from-here) —
+  still the strongest first-impression demo for a new user, not yet built
+- Published to npm registry (`npm install -g cambium`) — not yet published,
+  deliberately deferred until the tool has been used by someone other
+  than its author
 - `cambium watch` — background file-watching, closer to real-time than
   the commit-time hook (deferred until there's evidence commit-time
   isn't fast enough)
