@@ -33,7 +33,25 @@ correctly stopped flagging a file it had previously misdiagnosed.
 
 ## Install
 
-**Try it without installing anything globally, from inside the project:**
+**Install globally from npm** (easiest — no clone required):
+
+```bash
+npm install -g @okikijesutech/cambium
+```
+
+Or run it without installing anything, via `npx`:
+
+```bash
+npx @okikijesutech/cambium --help
+```
+
+Either way, the command itself is just `cambium`:
+
+```bash
+cambium --help
+```
+
+**Or, if you want to hack on the source itself:**
 
 ```bash
 git clone https://github.com/okikijesutech/cambium.git
@@ -43,18 +61,12 @@ npm run build
 node dist/cli.js --help
 ```
 
-**Or install it as a global command** (recommended once you're past
-first-try):
-
 ```bash
 npm link
 ```
 
-Then run `cambium` from any directory, on any repo:
-
-```bash
-cambium --help
-```
+links your local checkout as the global `cambium` command, so changes
+you make take effect immediately without republishing.
 
 If `npm install` fails with `ETARGET` on `ts-morph`, see
 Troubleshooting below.
@@ -258,9 +270,6 @@ build.
 
 - Onboarding scan mode for brownfield repos (baseline + drift-from-here) —
   still the strongest first-impression demo for a new user, not yet built
-- Published to npm registry (`npm install -g cambium`) — not yet published,
-  deliberately deferred until the tool has been used by someone other
-  than its author
 - `cambium watch` — background file-watching, closer to real-time than
   the commit-time hook (deferred until there's evidence commit-time
   isn't fast enough)
