@@ -16,6 +16,50 @@ export function parseModelJson(rawText: string): any {
  * error-prone. Catch the clearest failure mode: the same symbol name
  * assigned to more than one suggested file, which isn't a valid split.
  */
+/**
+ * The system prompt explicitly tells the model: "If hasDrifted is
+ * false, suggestedSplit must be null." Nothing previously verified
+ * compliance — a model response with hasDrifted:false but a non-empty
+ * suggestedSplit passed through silently, and would render as
+ * "Drifted: no" immediately followed by a "Suggested split:" section,
+ * which is actively confusing to read.
+ *
+ * hasDrifted:false + non-empty split -> suppress the split (the
+ * "not drifted" verdict takes precedence; presenting a split for a
+ * file just declared coherent is misleading regardless of warnings).
+ *
+ * hasDrifted:true + no split -> can't fabricate a split, just warn
+ * that the model gave a verdict without an actionable plan.
+ */
+function checkConsistency(
+  hasDrifted: boolean,
+  suggestedSplit: DriftAnalysis["suggestedSplit"]
+): { warnings: string[]; correctedSplit: DriftAnalysis["suggestedSplit"] } {
+  const hasRealSplit = !!suggestedSplit && suggestedSplit.length > 0;
+
+  if (!hasDrifted && hasRealSplit) {
+    return {
+      warnings: [
+        `Model reported hasDrifted:false but still provided a suggestedSplit — ` +
+          `contradictory. Suppressing the split since the "not drifted" verdict takes precedence.`,
+      ],
+      correctedSplit: null,
+    };
+  }
+
+  if (hasDrifted && !hasRealSplit) {
+    return {
+      warnings: [
+        `Model reported hasDrifted:true but provided no suggestedSplit — a drift verdict ` +
+          `without an actionable plan. Consider re-running this file.`,
+      ],
+      correctedSplit: suggestedSplit,
+    };
+  }
+
+  return { warnings: [], correctedSplit: suggestedSplit };
+}
+
 function findDuplicateSymbolWarnings(
   suggestedSplit: DriftAnalysis["suggestedSplit"]
 ): string[] {
@@ -144,16 +188,18 @@ export function validateDriftAnalysis(
   }
 
   const suggestedSplit = parsed.suggestedSplit ?? null;
+  const consistency = checkConsistency(parsed.hasDrifted, suggestedSplit);
 
   return {
     inferredOriginalPurpose: parsed.inferredOriginalPurpose,
     currentResponsibilities: parsed.currentResponsibilities,
     hasDrifted: parsed.hasDrifted,
     driftSummary: parsed.driftSummary,
-    suggestedSplit,
+    suggestedSplit: consistency.correctedSplit,
     warnings: [
-      ...findDuplicateSymbolWarnings(suggestedSplit),
-      ...findUnknownSymbolWarnings(suggestedSplit, actualExportedSymbols, importedSymbolNames),
+      ...consistency.warnings,
+      ...findDuplicateSymbolWarnings(consistency.correctedSplit),
+      ...findUnknownSymbolWarnings(consistency.correctedSplit, actualExportedSymbols, importedSymbolNames),
     ],
   };
 }

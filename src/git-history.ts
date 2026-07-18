@@ -25,8 +25,20 @@ export function getTouchFrequency(repoPath: string): Map<string, number> | null 
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     gitRoot = normalizeGitBashPath(rawRoot);
-  } catch {
-    return null; // not a git repo, or git isn't installed
+  } catch (err: any) {
+    // Exit status 127 is the POSIX convention for "command not found"
+    // (consistent across Linux/Mac/Windows Git Bash) — genuinely
+    // different from git's own status 128 "not a repository" error.
+    // Worth surfacing distinctly: "git isn't installed" silently
+    // breaks touch-frequency for EVERY repo scan, not just this one,
+    // and a user could go a long time without realizing that's why.
+    if (err?.status === 127) {
+      console.error(
+        `⚠ 'git' command not found — is git installed and on your PATH? ` +
+          `Touch-frequency signal will be unavailable until this is fixed.`
+      );
+    }
+    return null; // not a git repo (status 128), or git isn't installed (status 127)
   }
 
   let output: string;
