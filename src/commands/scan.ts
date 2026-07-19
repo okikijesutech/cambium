@@ -4,8 +4,19 @@ import { scanRepo } from "../scan-repo";
 import { getTouchFrequency } from "../git-history";
 import { attachTouchFrequency, computeOutlierScore, ScoredFileMetrics } from "../scoring";
 import { formatScanReportMarkdown } from "../report";
+import { loadBaseline, computeDelta, Baseline } from "../baseline";
 
-function printOutlierTable(results: ScoredFileMetrics[], limit: number) {
+function formatDelta(n: number): string {
+  if (n === 0) return "±0";
+  return n > 0 ? `+${n}` : `${n}`;
+}
+
+function printOutlierTable(
+  results: ScoredFileMetrics[],
+  limit: number,
+  repoPath: string,
+  baseline: Baseline | null
+) {
   const sorted = [...results].sort(
     (a, b) => computeOutlierScore(b) - computeOutlierScore(a)
   );
@@ -20,14 +31,30 @@ function printOutlierTable(results: ScoredFileMetrics[], limit: number) {
     const shortPath = m.filePath.split(/[\\/]/).slice(-3).join("/");
     const touchPart = hasTouchData ? `touches=${m.touchCount ?? "?"}  ` : "";
     const syntaxWarning = m.hasSyntaxErrors ? "⚠ SYNTAX ERROR — numbers below are unreliable  " : "";
+
+    let deltaPart = "";
+    if (baseline) {
+      const delta = computeDelta(m, baseline, repoPath);
+      deltaPart = delta.isNew
+        ? "NEW  "
+        : `Δcomplexity=${formatDelta(delta.complexityDelta)} Δlines=${formatDelta(delta.linesDelta)}  `;
+    }
+
     console.log(
       `  ${Math.round(computeOutlierScore(m)).toString().padStart(5)}  ` +
         `${syntaxWarning}complexity=${m.cyclomaticComplexity}  lines=${m.lines}  ` +
-        `fanIn=${m.fanIn}  ${touchPart}exports=${m.exportedSymbols.length}  ${shortPath}`
+        `fanIn=${m.fanIn}  ${touchPart}exports=${m.exportedSymbols.length}  ${deltaPart}${shortPath}`
     );
   }
   if (!hasTouchData) {
     console.log(`  (no git history found — touch-frequency signal unavailable)`);
+  }
+  if (baseline) {
+    console.log(`  (comparing against baseline from ${baseline.createdAt.slice(0, 10)})`);
+  } else {
+    console.log(
+      `  (no baseline found — run 'cambium baseline ${repoPath}' to start tracking change over time)`
+    );
   }
 
   const brokenCount = results.filter((m) => m.hasSyntaxErrors).length;
@@ -61,9 +88,10 @@ export function registerScanCommand(program: Command): void {
 
       const touchFrequency = getTouchFrequency(repoPath);
       const results = attachTouchFrequency(rawResults, touchFrequency);
+      const baseline = loadBaseline(repoPath);
 
       const limit = parseInt(opts.top, 10);
-      printOutlierTable(results, limit);
+      printOutlierTable(results, limit, repoPath, baseline);
 
       if (opts.output) {
         const markdown = formatScanReportMarkdown(results, repoPath, limit);

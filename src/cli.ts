@@ -8,6 +8,7 @@ import { registerDriftCommand } from "./commands/drift";
 import { registerFileCommand } from "./commands/file";
 import { registerCheckCommand } from "./commands/check";
 import { registerInstallHookCommand } from "./commands/install-hook";
+import { registerBaselineCommand } from "./commands/baseline";
 
 loadDotEnv(path.join(__dirname, ".."));
 
@@ -44,5 +45,6 @@ registerDriftCommand(program);
 registerFileCommand(program);
 registerCheckCommand(program);
 registerInstallHookCommand(program);
+registerBaselineCommand(program);
 
 program.parse();
