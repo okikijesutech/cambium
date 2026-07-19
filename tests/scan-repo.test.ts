@@ -30,4 +30,39 @@ describe("scanRepo — path validation", () => {
       fs.rmdirSync(emptyDir);
     }
   });
+
+  it("excludes .test-d.ts files (real bug found on execa: pure type-signature test files flooded the outlier ranking, crowding out real production code)", () => {
+    const dir = path.join(os.tmpdir(), `cambium-test-typetest-${Date.now()}`);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "types.test-d.ts"),
+      `import { expectType } from "tsd";\nexpectType<string>("x" as any);`
+    );
+    fs.writeFileSync(
+      path.join(dir, "real.ts"),
+      `export function real(x: number) { if (x > 0) { return x; } return 0; }`
+    );
+    try {
+      const results = scanRepo(dir);
+      expect(results).toHaveLength(1);
+      expect(results[0].filePath).toContain("real.ts");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT exclude regular .test.ts files (they contain real logic and can legitimately drift)", () => {
+    const dir = path.join(os.tmpdir(), `cambium-test-regulartest-${Date.now()}`);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "real.test.ts"),
+      `export function helper() { return 1; }`
+    );
+    try {
+      const results = scanRepo(dir);
+      expect(results).toHaveLength(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -15,6 +15,15 @@ const DEFAULT_IGNORE = [
   "**/.next/**",
   "**/coverage/**",
   "**/*.d.ts",
+  // Pure type-signature test files (tsd convention: *.test-d.ts) have
+  // zero runtime logic — they exist only to assert TS types compile
+  // correctly, always have 0 exports/0 fan-in by design, and on a
+  // repo that uses this pattern heavily they can flood the outlier
+  // ranking and crowd out real production code (confirmed on execa:
+  // every single top-25 result was a .test-d.ts file). Regular
+  // *.test.ts/*.spec.ts files are NOT excluded — those contain real
+  // behavioral logic and can legitimately drift.
+  "**/*.test-d.ts",
 ];
 
 /**
