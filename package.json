@@ -22,9 +22,17 @@
     "clean": "rm -rf dist",
     "build": "npm run clean && tsc && chmod +x dist/cli.js || true",
     "prepublishOnly": "npm run build",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
-  "keywords": ["typescript", "static-analysis", "refactoring", "ai-tools", "code-quality", "cli"],
+  "keywords": [
+    "typescript",
+    "static-analysis",
+    "refactoring",
+    "ai-tools",
+    "code-quality",
+    "cli"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -35,6 +43,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "vitest": "^4.1.10"
   }
 }
