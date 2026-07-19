@@ -94,6 +94,32 @@ Touch-frequency requires the repo to be a git repository with commit
 history — if it isn't, Cambium says so and falls back to
 complexity/lines/fan-in only, rather than failing.
 
+If a `.cambium/baseline.json` exists (see `cambium baseline` below),
+`scan` automatically shows how each file has changed since it was
+taken: `Δcomplexity=+3 Δlines=+5`, or `NEW` for files added since.
+This is the only signal that tracks whether a file is getting *worse*
+over time — everything else is a snapshot of its current state.
+
+### `cambium baseline <repoPath>`
+
+Snapshots every file in the repo (not just the top outliers) to
+`.cambium/baseline.json` — a fixed point future `cambium scan` runs
+compare against.
+
+```bash
+cambium baseline ../my-repo
+cambium baseline ../my-repo --force   # overwrite an existing baseline
+```
+
+Commit `.cambium/baseline.json` to git so your whole team compares
+against the same starting point, not whatever their local machine
+happened to see first. Paths are stored relative to the repo root
+specifically so this works across machines/clones.
+
+Won't silently overwrite an existing baseline — use `--force` if you
+really mean to reset the starting point (you lose the ability to
+measure drift since the *original* baseline date when you do this).
+
 ### `cambium drift <repoPath>`
 
 Scans the repo, then sends the top outlier files to an LLM to explain
@@ -268,11 +294,16 @@ build.
 
 ## Roadmap
 
-- Onboarding scan mode for brownfield repos (baseline + drift-from-here) —
-  still the strongest first-impression demo for a new user, not yet built
+Every item from the original roadmap is now shipped (touch-frequency
+in the LLM prompt, `check`/`install-hook`, npm publish, onboarding/
+baseline mode). Open ideas for what's next:
+
 - `cambium watch` — background file-watching, closer to real-time than
   the commit-time hook (deferred until there's evidence commit-time
   isn't fast enough)
+- Baseline-aware `drift` — currently only `scan` shows deltas; `drift`
+  could use "this file is getting worse" as another input to the LLM
+  judgment, similar to how touch-frequency already feeds in
 
 ## License
 

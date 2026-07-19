@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## [1.3.0]
+### Added
+- `cambium baseline <repoPath>` — snapshots every file's static
+  metrics (not just top-N outliers) to `.cambium/baseline.json`,
+  keyed by path relative to repo root so it's portable across
+  machines and committable to git for a whole team to compare
+  against the same fixed point
+- `cambium scan` now auto-detects a baseline and shows real deltas
+  per file (`Δcomplexity`, `Δlines`, or `NEW` for files added since)
+  — the first signal that tracks whether a file is getting *worse*
+  over time, not just how bad it currently is
+- Refuses to silently overwrite an existing baseline (`--force`
+  required); a corrupted baseline file degrades gracefully instead
+  of breaking every future scan
+
+This closes out every item from the original roadmap: touch-frequency
+in the LLM prompt, `check`/`install-hook`, npm publish, and now
+onboarding/baseline mode.
+
 ## [1.2.0]
 ### Added
 - Touch-frequency now feeds into the LLM drift prompt, with explicit
