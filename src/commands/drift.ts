@@ -7,7 +7,7 @@ import { attachTouchFrequency, computeOutlierScore } from "../scoring";
 import { analyzeDrift, LLMProvider, DriftAnalysis } from "../analyze-drift";
 import { formatDriftReportMarkdown } from "../report";
 import { isTestFile } from "../test-file-detection";
-import { normalizePathKey } from "../git-paths";
+import { normalizePathKey, toForwardSlashes } from "../git-paths";
 
 function resolveProvider(): LLMProvider {
   const forced = process.env.LLM_PROVIDER; // "anthropic" | "ollama"
@@ -154,7 +154,7 @@ export function registerDriftCommand(program: Command): void {
         let top;
 
         if (opts.file) {
-          const requestedAbs = path.resolve(repoPath, opts.file);
+          const requestedAbs = toForwardSlashes(path.resolve(repoPath, opts.file));
           const requestedKey = normalizePathKey(requestedAbs);
           const match = parseable.find(
             (m) => normalizePathKey(m.filePath) === requestedKey

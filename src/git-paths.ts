@@ -1,4 +1,17 @@
 /**
+ * Node's path.resolve() returns backslash-separated paths on Windows,
+ * but every path stored/compared elsewhere in this codebase (via
+ * ts-morph in scan-repo.ts) uses forward slashes. Comparing the two
+ * without normalizing first silently never matches, even for the
+ * exact same file — this bit both the original touch-frequency
+ * feature and, later, the --file flag on drift. Centralized here so
+ * it's fixed once, not re-patched inline every time it's needed.
+ */
+export function toForwardSlashes(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
+/**
  * Windows filesystems (NTFS) are case-insensitive, but JS Map/string
  * comparisons are not. git's toplevel path and ts-morph's resolved
  * absolute paths can end up differently-cased depending on how the

@@ -1,6 +1,6 @@
 import { execSync } from "child_process";
 import * as path from "path";
-import { normalizePathKey, normalizeGitBashPath } from "./git-paths";
+import { normalizePathKey, normalizeGitBashPath, toForwardSlashes } from "./git-paths";
 
 /**
  * Touch frequency: how many commits touched a given file. A file
@@ -65,7 +65,7 @@ export function getTouchFrequency(repoPath: string): Map<string, number> | null 
     // `git rev-parse --show-toplevel`), not to whatever subdirectory
     // was passed in as repoPath — resolving against repoPath directly
     // silently breaks whenever repoPath is a subdirectory of the repo.
-    const absolute = path.resolve(gitRoot, line).replace(/\\/g, "/");
+    const absolute = toForwardSlashes(path.resolve(gitRoot, line));
     const key = normalizePathKey(absolute);
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
