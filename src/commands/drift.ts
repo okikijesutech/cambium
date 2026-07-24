@@ -1,10 +1,13 @@
 import { Command } from "commander";
 import * as fs from "fs";
+import * as path from "path";
 import { scanRepo } from "../scan-repo";
 import { getTouchFrequency } from "../git-history";
 import { attachTouchFrequency, computeOutlierScore } from "../scoring";
 import { analyzeDrift, LLMProvider, DriftAnalysis } from "../analyze-drift";
 import { formatDriftReportMarkdown } from "../report";
+import { isTestFile } from "../test-file-detection";
+import { normalizePathKey } from "../git-paths";
 
 function resolveProvider(): LLMProvider {
   const forced = process.env.LLM_PROVIDER; // "anthropic" | "ollama"
@@ -80,6 +83,17 @@ export function registerDriftCommand(program: Command): void {
       "8"
     )
     .option("-o, --output <path>", "save results as a markdown report to this file")
+    .option(
+      "--exclude-tests",
+      "exclude regular test files (*.test.ts, *.spec.ts) from results — " +
+        "off by default, since test-file drift can be real signal too"
+    )
+    .option(
+      "-f, --file <path>",
+      "analyze exactly this file, skipping ranking and --min-lines/--min-complexity " +
+        "entirely — use this to target a specific file (e.g. the 2nd-ranked one from " +
+        "'cambium scan') without re-analyzing everything ranked above it"
+    )
     .action(
       async (
         repoPath: string,
@@ -89,6 +103,8 @@ export function registerDriftCommand(program: Command): void {
           minLines: string;
           minComplexity: string;
           output?: string;
+          excludeTests?: boolean;
+          file?: string;
         }
       ) => {
         const provider = resolveProvider();
@@ -106,6 +122,15 @@ export function registerDriftCommand(program: Command): void {
           process.exit(1);
         }
         console.error(`Found ${rawResults.length} file(s).`);
+
+        if (opts.excludeTests) {
+          const beforeCount = rawResults.length;
+          rawResults = rawResults.filter((m) => !isTestFile(m.filePath));
+          const excluded = beforeCount - rawResults.length;
+          if (excluded > 0) {
+            console.error(`Excluding ${excluded} test file(s) (--exclude-tests).`);
+          }
+        }
 
         const touchFrequency = getTouchFrequency(repoPath);
         if (touchFrequency === null) {
@@ -126,34 +151,66 @@ export function registerDriftCommand(program: Command): void {
         }
         const parseable = results.filter((m) => !m.hasSyntaxErrors);
 
-        const sorted = [...parseable].sort(
-          (a, b) => computeOutlierScore(b) - computeOutlierScore(a)
-        );
-        const candidates = sorted.slice(0, parseInt(opts.top, 10));
+        let top;
 
-        const minLines = parseInt(opts.minLines, 10);
-        const minComplexity = parseInt(opts.minComplexity, 10);
-
-        // Skip files that are too small to be worth SPLITTING INTO MULTIPLE
-        // FILES, regardless of internal complexity. A 36-line function can
-        // be messy (worth simplifying) without being a candidate for
-        // decomposition into separate modules — that only makes sense once
-        // a file is both long enough AND complex enough to warrant it.
-        const top = candidates.filter(
-          (m) => m.lines >= minLines && m.cyclomaticComplexity >= minComplexity
-        );
-        const skipped = candidates.filter(
-          (m) => !(m.lines >= minLines && m.cyclomaticComplexity >= minComplexity)
-        );
-
-        if (skipped.length > 0) {
-          console.error(
-            `\nSkipping ${skipped.length} file(s) too small to warrant a multi-file split ` +
-              `(need >= ${minLines} lines AND >= complexity ${minComplexity}):`
+        if (opts.file) {
+          const requestedAbs = path.resolve(repoPath, opts.file);
+          const requestedKey = normalizePathKey(requestedAbs);
+          const match = parseable.find(
+            (m) => normalizePathKey(m.filePath) === requestedKey
           );
-          for (const m of skipped) {
-            const shortName = m.filePath.split(/[\\/]/).pop();
-            console.error(`  - ${shortName} (lines=${m.lines}, complexity=${m.cyclomaticComplexity})`);
+
+          if (!match) {
+            const brokenMatch = brokenFiles.find(
+              (m) => normalizePathKey(m.filePath) === requestedKey
+            );
+            if (brokenMatch) {
+              console.error(
+                `Error: ${opts.file} has syntax errors — its metrics aren't trustworthy, ` +
+                  `so it's not eligible for drift analysis. Fix the syntax first.`
+              );
+            } else {
+              console.error(
+                `Error: ${opts.file} was not found among the scanned .ts/.tsx files under ${repoPath}. ` +
+                  `Check the path (relative to ${repoPath}) and that it isn't excluded ` +
+                  `(node_modules, .d.ts, .test-d.ts, or --exclude-tests).`
+              );
+            }
+            process.exit(1);
+          }
+
+          console.error(`Targeting exactly one file (--file): ${opts.file}`);
+          top = [match];
+        } else {
+          const sorted = [...parseable].sort(
+            (a, b) => computeOutlierScore(b) - computeOutlierScore(a)
+          );
+          const candidates = sorted.slice(0, parseInt(opts.top, 10));
+
+          const minLines = parseInt(opts.minLines, 10);
+          const minComplexity = parseInt(opts.minComplexity, 10);
+
+          // Skip files that are too small to be worth SPLITTING INTO MULTIPLE
+          // FILES, regardless of internal complexity. A 36-line function can
+          // be messy (worth simplifying) without being a candidate for
+          // decomposition into separate modules — that only makes sense once
+          // a file is both long enough AND complex enough to warrant it.
+          top = candidates.filter(
+            (m) => m.lines >= minLines && m.cyclomaticComplexity >= minComplexity
+          );
+          const skipped = candidates.filter(
+            (m) => !(m.lines >= minLines && m.cyclomaticComplexity >= minComplexity)
+          );
+
+          if (skipped.length > 0) {
+            console.error(
+              `\nSkipping ${skipped.length} file(s) too small to warrant a multi-file split ` +
+                `(need >= ${minLines} lines AND >= complexity ${minComplexity}):`
+            );
+            for (const m of skipped) {
+              const shortName = m.filePath.split(/[\\/]/).pop();
+              console.error(`  - ${shortName} (lines=${m.lines}, complexity=${m.cyclomaticComplexity})`);
+            }
           }
         }
 

@@ -5,6 +5,7 @@ import { getTouchFrequency } from "../git-history";
 import { attachTouchFrequency, computeOutlierScore, ScoredFileMetrics } from "../scoring";
 import { formatScanReportMarkdown } from "../report";
 import { loadBaseline, computeDelta, Baseline } from "../baseline";
+import { isTestFile } from "../test-file-detection";
 
 function formatDelta(n: number): string {
   if (n === 0) return "±0";
@@ -75,7 +76,12 @@ export function registerScanCommand(program: Command): void {
     .argument("<repoPath>", "path to the repo root")
     .option("-n, --top <number>", "how many outliers to show", "25")
     .option("-o, --output <path>", "save results as a markdown report to this file")
-    .action((repoPath: string, opts: { top: string; output?: string }) => {
+    .option(
+      "--exclude-tests",
+      "exclude regular test files (*.test.ts, *.spec.ts) from results — " +
+        "off by default, since test-file drift can be real signal too"
+    )
+    .action((repoPath: string, opts: { top: string; output?: string; excludeTests?: boolean }) => {
       console.error(`Scanning ${repoPath} ...`);
       let rawResults;
       try {
@@ -85,6 +91,15 @@ export function registerScanCommand(program: Command): void {
         process.exit(1);
       }
       console.error(`Found ${rawResults.length} file(s).`);
+
+      if (opts.excludeTests) {
+        const beforeCount = rawResults.length;
+        rawResults = rawResults.filter((m) => !isTestFile(m.filePath));
+        const excluded = beforeCount - rawResults.length;
+        if (excluded > 0) {
+          console.error(`Excluding ${excluded} test file(s) (--exclude-tests).`);
+        }
+      }
 
       const touchFrequency = getTouchFrequency(repoPath);
       const results = attachTouchFrequency(rawResults, touchFrequency);
