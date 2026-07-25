@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [1.4.1]
+### Fixed
+- CI was failing on every single run since it went live (6/6 red) —
+  `vitest@4.1.10`'s dependency chain requires `util.styleText`, a
+  Node API that only exists from Node 20.12+. Every run failed at
+  test startup, before any real test executed, which is why all 6
+  failures had nearly identical (~20-30s) durations — same root
+  cause every time, not six separate flaky failures.
+- Dropped Node 18 from the CI matrix (18.x -> 20.x, 22.x) and bumped
+  `engines.node` to `>=20` to match — Node 18 is also past its
+  end-of-life. The published CLI itself doesn't use any Node 20+
+  specific APIs; this only reflects what the *test tooling* actually
+  requires, verified by running the full suite on Node 22.
+
 ## [1.4.0]
 ### Added
 - `cambium scan`/`cambium drift --exclude-tests` — opt-in exclusion
