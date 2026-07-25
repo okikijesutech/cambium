@@ -2,6 +2,40 @@
 
 ## [Unreleased]
 
+## [1.4.0]
+### Added
+- `cambium scan`/`cambium drift --exclude-tests` — opt-in exclusion
+  of regular test files (`*.test.ts`, `*.spec.ts`) from results
+- `*.test-d.ts` (tsd type-signature test files) now always excluded
+  unconditionally — found via a real test against `execa`, where
+  these zero-runtime-logic files flooded the outlier ranking
+- `cambium drift -f/--file <path>` — analyze exactly one file,
+  bypassing `--top` ranking and `--min-lines`/`--min-complexity`
+  thresholds entirely
+- Description-to-split mismatch guardrail (heuristic): flags a
+  `currentResponsibilities` item that isn't addressed by any file in
+  the suggested split — found on a real production codebase where a
+  file named `notification-service.ts` described its responsibility
+  as "database transactions" while its real exports were about
+  sending notifications
+- First real automated test suite (45 tests via Vitest) and CI
+  pipeline (GitHub Actions: type-check, build, test, CLI smoke test
+  on Node 18 & 20) — every test traces to an actual bug found and
+  fixed during development, not invented coverage
+### Fixed
+- `--file` failed to match real files on Windows: `path.resolve()`
+  returns backslash-separated paths, but scan results always use
+  forward slashes. Consolidated into a shared `toForwardSlashes()`
+  utility (was previously duplicated inline in `git-history.ts`)
+- npm package was silently shipping 3 dead compiled files
+  (`run-drift.js`, `run-scan.js`, `run-single.js`, deleted from
+  source months earlier) because `tsc` doesn't clean its own output
+  directory — added an explicit clean step before every build
+### Changed
+- Published to npm as `@okikijesutech/cambium` (the unscoped name
+  `cambium` was already taken); the `cambium` command itself is
+  unaffected
+
 ## [1.3.0]
 ### Added
 - `cambium baseline <repoPath>` — snapshots every file's static

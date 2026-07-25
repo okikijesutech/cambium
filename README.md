@@ -1,5 +1,7 @@
 # Cambium
 
+[![CI](https://github.com/okikijesutech/cambium/actions/workflows/ci.yml/badge.svg)](https://github.com/okikijesutech/cambium/actions/workflows/ci.yml)
+
 **Cambium watches your codebase grow and tells you when a module's
 scope has outgrown its original shape — before the debt calcifies
 into a rewrite.**
@@ -83,12 +85,24 @@ touch-frequency, and prints the top outliers.
 cambium scan ../my-repo
 cambium scan ../my-repo --top 10
 cambium scan ../my-repo --output scan-report.md
+cambium scan ../my-repo --exclude-tests
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `-n, --top <number>` | `25` | how many outliers to show |
 | `-o, --output <path>` | — | save results as a markdown report |
+| `--exclude-tests` | off | exclude regular test files (`*.test.ts`, `*.spec.ts`) from results |
+
+Pure type-signature test files (`*.test-d.ts`, the `tsd` convention)
+are **always** excluded, unconditionally — they have zero runtime
+logic and always show `0` exports/fan-in by design, which floods
+outlier rankings with noise on repos that use this pattern (found on
+a real test against `execa`). Regular `*.test.ts`/`*.spec.ts` files
+are kept by default, since they contain real logic and can
+legitimately drift — `--exclude-tests` is opt-in for when you want
+production code only (useful on repos with very large test files,
+like `hono`, where test files otherwise dominate the top rankings).
 
 Touch-frequency requires the repo to be a git repository with commit
 history — if it isn't, Cambium says so and falls back to
@@ -129,6 +143,8 @@ Scans the repo, then sends the top outlier files to an LLM to explain
 cambium drift ../my-repo --top 3
 cambium drift ../my-repo --top 3 --json          # raw JSON output
 cambium drift ../my-repo --top 3 --output report.md
+cambium drift ../my-repo --exclude-tests
+cambium drift ../my-repo --file src/context.ts   # analyze exactly one file
 ```
 
 | Flag | Default | Meaning |
@@ -138,11 +154,21 @@ cambium drift ../my-repo --top 3 --output report.md
 | `--json` | off | raw JSON instead of formatted terminal output |
 | `--min-lines <number>` | `80` | skip files below this line count |
 | `--min-complexity <number>` | `8` | skip files below this complexity |
+| `--exclude-tests` | off | exclude regular test files from consideration |
+| `-f, --file <path>` | — | analyze exactly this file, ignoring `--top` and thresholds entirely |
+
+`--file` is for when you already know which file you want (e.g. the
+2nd-ranked one from `cambium scan`) and don't want to re-analyze
+everything ranked above it — explicit selection overrides `--top`
+and `--min-lines`/`--min-complexity` completely, even for a file that
+would normally be skipped as too small.
 
 A file must clear **both** `--min-lines` and `--min-complexity` to be
 analyzed — splitting into multiple files only makes sense once a file
 is both long and complex enough to warrant it. Files below the
-threshold are listed and skipped, not silently dropped.
+threshold are listed and skipped, not silently dropped. Files with
+syntax errors are always excluded (see `cambium scan` above) — their
+metrics aren't trustworthy enough to analyze.
 
 **Local inference is slow.** On modest CPU hardware, expect anywhere
 from a few minutes to 15+ minutes per file with Ollama. This is
@@ -234,11 +260,31 @@ manually in your shell takes priority over `.env`.
 }
 ```
 
-`warnings` flags problems Cambium found in its own suggestion, e.g.:
+`warnings` flags problems Cambium found in its own suggestion. Two
+kinds, worth telling apart:
+
+**Exact, verified checks** (cross-checked against real static
+analysis, not the model's word):
 - the same symbol assigned to two different files in the split
-- suggested symbols that don't match the file's real exported symbols
-  (common for files where everything is trapped in closures — the
-  model is naming what it read, not verified exports)
+- a suggested symbol that's genuinely imported from elsewhere, not
+  defined in this file at all — the file doesn't own that code and
+  can't "move" it
+- a suggested symbol that doesn't match any real export (may be an
+  unexported local helper — common for files where everything is
+  trapped in closures)
+- `hasDrifted: false` with a non-empty `suggestedSplit` (contradictory
+  — the split is suppressed, not-drifted takes precedence)
+
+**Heuristic checks** (word-overlap based, explicitly labeled
+"not verified" in the warning text itself — can have false negatives
+on paraphrased wording):
+- a responsibility described in `currentResponsibilities` that isn't
+  addressed by any file in `suggestedSplit` — usually means the model
+  mislabeled one of its own suggested files (found on a real
+  production codebase: a file named `notification-service.ts` had a
+  responsibility description about "database transactions," while
+  its real exports were about sending notifications — the label and
+  the content didn't match)
 
 Treat `suggestedSplit` as a starting point for your own judgment,
 especially when `warnings` is non-empty — not a ready-to-execute plan.
@@ -261,7 +307,22 @@ npm install
 npx ts-node src/cli.ts <command>    # run without building
 npm run build                        # compile to dist/
 npx tsc --noEmit                     # type-check only
+npm test                             # run the test suite (vitest)
+npm run test:watch                   # watch mode
 ```
+
+**Testing philosophy:** every test in `tests/` traces to a real bug
+found and fixed during development — not invented coverage. Windows
+path case-sensitivity, Git Bash POSIX-path conversion, chained
+`expect().toBe()` double-counting, syntax-error false positives on
+valid-but-untyped code, typo'd-path vs. empty-repo confusion,
+`hasDrifted`/`suggestedSplit` contradictions, baseline delta math,
+and the description-mismatch guardrail are all locked in as
+regressions using the exact real inputs that found each one.
+
+CI (`.github/workflows/ci.yml`) runs type-check, build, tests, and a
+smoke test of the compiled CLI on every push/PR to `main`, across
+Node 18 and 20.
 
 ### On Windows / Git Bash (MINGW64)
 
