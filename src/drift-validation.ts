@@ -166,6 +166,63 @@ function findUnknownSymbolWarnings(
   return warnings;
 }
 
+const STOPWORDS = new Set([
+  "the", "a", "an", "of", "to", "and", "for", "in", "on", "with", "from",
+  "by", "as", "is", "are", "this", "that", "it", "its", "or", "not",
+  "including", "based", "into", "their", "these", "such", "handling",
+]);
+
+function significantTokens(text: string): Set<string> {
+  const words = text.toLowerCase().match(/[a-z]+/g) ?? [];
+  return new Set(words.filter((w) => w.length > 2 && !STOPWORDS.has(w)));
+}
+
+/**
+ * Heuristic, word-overlap based — NOT a verified fact the way the
+ * export/import checks are, and the warning text says so explicitly.
+ * Real bug this catches: the model's prose in currentResponsibilities
+ * can describe something that its own suggestedSplit never actually
+ * addresses anywhere — e.g. a file named "notification-service.ts"
+ * whose stated responsibility talks about database transactions,
+ * while "sending setup notifications" (a real currentResponsibilities
+ * item) isn't covered by ANY suggested file's description at all.
+ * That's the model scrambling its own labels, not just an unverified
+ * symbol — a different failure mode from anything checked so far.
+ */
+function findUnaddressedResponsibilityWarnings(
+  currentResponsibilities: string[],
+  suggestedSplit: DriftAnalysis["suggestedSplit"]
+): string[] {
+  if (!suggestedSplit || suggestedSplit.length === 0) return [];
+  if (!Array.isArray(currentResponsibilities) || currentResponsibilities.length === 0) return [];
+
+  const splitTokenPool = new Set<string>();
+  for (const entry of suggestedSplit) {
+    for (const t of significantTokens(entry.responsibility ?? "")) {
+      splitTokenPool.add(t);
+    }
+  }
+
+  const unaddressed: string[] = [];
+  for (const responsibility of currentResponsibilities) {
+    const tokens = significantTokens(responsibility);
+    if (tokens.size === 0) continue; // nothing meaningful to check
+    const hasAnyOverlap = [...tokens].some((t) => splitTokenPool.has(t));
+    if (!hasAnyOverlap) {
+      unaddressed.push(responsibility);
+    }
+  }
+
+  if (unaddressed.length === 0) return [];
+
+  return [
+    `Possible description mismatch (heuristic, word-overlap check — not verified): ` +
+      `the analysis says this file is responsible for "${unaddressed.join('", "')}", but no file ` +
+      `in the suggested split describes anything related to that — the split may be incomplete ` +
+      `or a file's stated responsibility may not match its real content.`,
+  ];
+}
+
 export function validateDriftAnalysis(
   parsed: any,
   rawText: string,
@@ -198,6 +255,7 @@ export function validateDriftAnalysis(
     suggestedSplit: consistency.correctedSplit,
     warnings: [
       ...consistency.warnings,
+      ...findUnaddressedResponsibilityWarnings(parsed.currentResponsibilities, consistency.correctedSplit),
       ...findDuplicateSymbolWarnings(consistency.correctedSplit),
       ...findUnknownSymbolWarnings(consistency.correctedSplit, actualExportedSymbols, importedSymbolNames),
     ],

@@ -102,6 +102,84 @@ describe("validateDriftAnalysis — internal consistency (hasDrifted vs suggeste
   });
 });
 
+describe("validateDriftAnalysis — description-to-split mismatch (heuristic)", () => {
+  it("flags a real bug: a currentResponsibilities item with no representation anywhere in the suggested split (real school_web_project bulk-upload route.ts case)", () => {
+    const parsed = {
+      inferredOriginalPurpose: "Handling bulk student uploads for a school management system.",
+      currentResponsibilities: [
+        "Validating and processing student data from a bulk upload request.",
+        "Creating user accounts and profiles for students and their guardians.",
+        "Generating temporary passwords and sending setup notifications to users.",
+        "Managing database transactions to ensure atomicity of operations.",
+      ],
+      hasDrifted: true,
+      driftSummary: "test",
+      suggestedSplit: [
+        {
+          newFileName: "student-validation.ts",
+          responsibility: "Validating and processing student data from a bulk upload request.",
+          movedExports: ["normalizeOptionalString"],
+        },
+        {
+          newFileName: "user-account-creation.ts",
+          responsibility: "Creating user accounts and profiles for students and their guardians.",
+          movedExports: ["generateTemporaryPassword"],
+        },
+        {
+          // Real bug: this file's NAME suggests notifications, but its stated
+          // responsibility text is about database transactions instead —
+          // "temporary passwords / setup notifications" is addressed nowhere.
+          newFileName: "notification-service.ts",
+          responsibility: "Managing database transactions to ensure atomicity of operations.",
+          movedExports: ["NotificationService", "sendWelcomeCredentials"],
+        },
+      ],
+    };
+
+    const result = validateDriftAnalysis(parsed, JSON.stringify(parsed), [], []);
+    const warning = result.warnings.find((w) => w.includes("description mismatch"));
+    expect(warning).toBeDefined();
+    expect(warning).toContain("temporary passwords");
+  });
+
+  it("does not false-positive on a real, complete split (real proxy.ts case)", () => {
+    const parsed = {
+      inferredOriginalPurpose: "Authentication and authorization middleware for a Next.js application.",
+      currentResponsibilities: [
+        "Authentication handling using NextAuth.js.",
+        "Authorization checks based on user roles and routes.",
+        "Rate limiting for API requests.",
+        "Handling public assets and APIs.",
+        "Redirecting users based on their role and route access.",
+      ],
+      hasDrifted: true,
+      driftSummary: "test",
+      suggestedSplit: [
+        { newFileName: "auth.ts", responsibility: "Authentication handling using NextAuth.js.", movedExports: ["default"] },
+        { newFileName: "authorization.ts", responsibility: "Authorization checks based on user roles and routes.", movedExports: [] },
+        { newFileName: "rate-limiting.ts", responsibility: "Rate limiting for API requests.", movedExports: [] },
+        { newFileName: "public-assets.ts", responsibility: "Handling public assets and APIs.", movedExports: [] },
+        { newFileName: "redirects.ts", responsibility: "Redirecting users based on their role and route access.", movedExports: [] },
+      ],
+    };
+
+    const result = validateDriftAnalysis(parsed, JSON.stringify(parsed), [], []);
+    expect(result.warnings.some((w) => w.includes("description mismatch"))).toBe(false);
+  });
+
+  it("does not run at all when hasDrifted is false (no split to check against)", () => {
+    const parsed = {
+      inferredOriginalPurpose: "x",
+      currentResponsibilities: ["Something totally unrelated to anything."],
+      hasDrifted: false,
+      driftSummary: "test",
+      suggestedSplit: null,
+    };
+    const result = validateDriftAnalysis(parsed, JSON.stringify(parsed), [], []);
+    expect(result.warnings.some((w) => w.includes("description mismatch"))).toBe(false);
+  });
+});
+
 describe("validateDriftAnalysis — malformed responses fail loudly", () => {
   it("throws when required fields are missing, rather than silently returning partial data", () => {
     const broken = { inferredOriginalPurpose: "x" };
