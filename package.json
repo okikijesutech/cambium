@@ -1,6 +1,6 @@
 {
   "name": "@okikijesutech/cambium",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Structural drift detection for AI-assisted codebases — catches modules whose scope has outgrown their original design, before they calcify into a rewrite.",
   "main": "dist/cli.js",
   "bin": {
@@ -39,7 +39,7 @@
     "commander": "^15.0.0",
     "ts-morph": "^28.0.0",
     "typescript": "5.6.3",
-    "undici": "^8.7.0"
+    "undici": "^7.9.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

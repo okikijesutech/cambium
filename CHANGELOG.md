@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [1.4.2]
+### Fixed
+- CI's `test (20.x)` job still failed after the Node 18 fix, this time
+  at the smoke-test step: `undici@8.0.3+` has a documented regression
+  breaking Node 20 (confirmed via nodejs/undici#5024 — a maintainer
+  confirms 8.0.2 works, 8.0.3 doesn't). Downgraded to `undici@^7.9.0`
+  (resolves to 7.29.0), which predates the regression entirely. Our
+  usage is limited to `Agent`/`setGlobalDispatcher`, a stable API
+  present well before undici 7.x.
+- Verified locally (type-check, build, full test suite, CLI smoke
+  test) on Node 22 — the exact failing Node 20.20.2 runner can't be
+  reproduced in this environment, so the real proof is the next CI
+  run, not this local pass.
+
 ## [1.4.1]
 ### Fixed
 - CI was failing on every single run since it went live (6/6 red) —
