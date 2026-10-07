@@ -49,10 +49,11 @@ export function registerCheckCommand(program: Command): void {
     .option("--min-lines <number>", "flag threshold for line count", "80")
     .option("--min-complexity <number>", "flag threshold for complexity", "8")
     .option("--strict", "exit non-zero when flagged, instead of warning only")
+    .option("--json", "output result as machine-readable JSON")
     .action(
       (
         filePath: string,
-        opts: { minLines: string; minComplexity: string; strict?: boolean }
+        opts: { minLines: string; minComplexity: string; strict?: boolean; json?: boolean }
       ) => {
         let result;
         try {
@@ -67,11 +68,18 @@ export function registerCheckCommand(program: Command): void {
           process.exit(1);
         }
 
-        if (result.flagged && opts.strict) {
-          console.error(result.message);
-          process.exitCode = 1;
+        if (opts.json) {
+          console.log(JSON.stringify(result, null, 2));
         } else {
-          console.log(result.message);
+          if (result.flagged && opts.strict) {
+            console.error(result.message);
+          } else {
+            console.log(result.message);
+          }
+        }
+
+        if (result.flagged && opts.strict) {
+          process.exitCode = 1;
         }
       }
     );
