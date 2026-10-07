@@ -94,6 +94,8 @@ export function registerDriftCommand(program: Command): void {
         "entirely — use this to target a specific file (e.g. the 2nd-ranked one from " +
         "'cambium scan') without re-analyzing everything ranked above it"
     )
+    .option("--ignore <pattern...>", "one or more glob patterns to ignore (e.g. 'src/data/**')")
+    .option("--no-ignore-file", "do not read .cambiumignore file")
     .action(
       async (
         repoPath: string,
@@ -105,6 +107,8 @@ export function registerDriftCommand(program: Command): void {
           output?: string;
           excludeTests?: boolean;
           file?: string;
+          ignore?: string[];
+          ignoreFile?: boolean;
         }
       ) => {
         const provider = resolveProvider();
@@ -116,7 +120,10 @@ export function registerDriftCommand(program: Command): void {
 
         let rawResults;
         try {
-          rawResults = scanRepo(repoPath);
+          rawResults = scanRepo(repoPath, {
+            ignorePatterns: opts.ignore,
+            useCambiumIgnore: opts.ignoreFile,
+          });
         } catch (err) {
           console.error(`Error: ${(err as Error).message}`);
           process.exit(1);

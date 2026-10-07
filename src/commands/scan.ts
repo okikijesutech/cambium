@@ -183,21 +183,37 @@ export function registerScanCommand(program: Command): void {
       "exclude regular test files (*.test.ts, *.spec.ts) from results — " +
         "off by default, since test-file drift can be real signal too"
     )
+    .option("--ignore <pattern...>", "one or more glob patterns to ignore (e.g. 'src/data/**')")
+    .option("--no-ignore-file", "do not read .cambiumignore file")
     .option("--json", "output raw JSON instead of formatted table")
-    .action((repoPath: string, opts: { top: string; output?: string; excludeTests?: boolean; json?: boolean }) => {
-      if (!opts.json) {
-        console.error(`Scanning ${repoPath} ...`);
-      }
-      let rawResults;
-      try {
-        rawResults = scanRepo(repoPath);
-      } catch (err) {
-        console.error(`Error: ${(err as Error).message}`);
-        process.exit(1);
-      }
-      if (!opts.json) {
-        console.error(`Found ${rawResults.length} file(s).`);
-      }
+    .action(
+      (
+        repoPath: string,
+        opts: {
+          top: string;
+          output?: string;
+          excludeTests?: boolean;
+          json?: boolean;
+          ignore?: string[];
+          ignoreFile?: boolean;
+        }
+      ) => {
+        if (!opts.json) {
+          console.error(`Scanning ${repoPath} ...`);
+        }
+        let rawResults;
+        try {
+          rawResults = scanRepo(repoPath, {
+            ignorePatterns: opts.ignore,
+            useCambiumIgnore: opts.ignoreFile,
+          });
+        } catch (err) {
+          console.error(`Error: ${(err as Error).message}`);
+          process.exit(1);
+        }
+        if (!opts.json) {
+          console.error(`Found ${rawResults.length} file(s).`);
+        }
 
       if (opts.excludeTests) {
         const beforeCount = rawResults.length;
