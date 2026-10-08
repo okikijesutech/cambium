@@ -2,9 +2,15 @@ import { Project } from "ts-morph";
 import * as path from "path";
 import * as fs from "fs";
 import { computeFileMetrics, FileMetrics } from "./metrics";
+import { loadCambiumIgnore, createIgnoreMatcher, isIgnoredByPragma } from "./ignore";
 
 export interface RepoFileMetrics extends FileMetrics {
   fanIn: number; // how many other files in the repo import from this one
+}
+
+export interface ScanOptions {
+  ignorePatterns?: string[];
+  useCambiumIgnore?: boolean; // defaults to true
 }
 
 const DEFAULT_IGNORE = [
@@ -31,11 +37,13 @@ const DEFAULT_IGNORE = [
  * Project (needed so fan-in resolution can see the whole module graph),
  * and return per-file metrics including fan-in.
  *
+ * Supports .cambiumignore, custom ignorePatterns, and inline @cambium-ignore comments.
+ *
  * Throws if repoRoot doesn't exist or isn't a directory — without this,
  * a typo'd path silently returns an empty result identical to a
  * legitimately empty repo, with no way to tell the two apart.
  */
-export function scanRepo(repoRoot: string): RepoFileMetrics[] {
+export function scanRepo(repoRoot: string, options?: ScanOptions): RepoFileMetrics[] {
   if (!fs.existsSync(repoRoot)) {
     throw new Error(`Path does not exist: ${repoRoot}`);
   }
@@ -47,13 +55,35 @@ export function scanRepo(repoRoot: string): RepoFileMetrics[] {
     skipAddingFilesFromTsConfig: true,
   });
 
+  const cambiumIgnorePatterns =
+    options?.useCambiumIgnore !== false ? loadCambiumIgnore(repoRoot) : [];
+  const cliPatterns = options?.ignorePatterns ?? [];
+  const userPatterns = [...cambiumIgnorePatterns, ...cliPatterns];
+
+  const allIgnoreGlobs = [...DEFAULT_IGNORE, ...userPatterns];
+
   const globPattern = path.join(repoRoot, "**/*.{ts,tsx}").replace(/\\/g, "/");
   project.addSourceFilesAtPaths([
     globPattern,
-    ...DEFAULT_IGNORE.map((p) => `!${path.join(repoRoot, p).replace(/\\/g, "/")}`),
+    ...allIgnoreGlobs.map((p) => {
+      const clean = p.trim().replace(/^!/, "");
+      return `!${path.join(repoRoot, clean).replace(/\\/g, "/")}`;
+    }),
   ]);
 
-  const sourceFiles = project.getSourceFiles();
+  const rawSourceFiles = project.getSourceFiles();
+
+  // Filter out any files that matched user patterns or contain the inline @cambium-ignore pragma
+  const ignoreMatcher = createIgnoreMatcher(userPatterns, repoRoot);
+  const sourceFiles = rawSourceFiles.filter((sf) => {
+    if (ignoreMatcher(sf.getFilePath())) {
+      return false;
+    }
+    if (isIgnoredByPragma(sf.getFullText())) {
+      return false;
+    }
+    return true;
+  });
 
   // Build fan-in counts: for each file, how many OTHER files
   // resolve an import to it.

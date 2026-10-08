@@ -9,6 +9,7 @@ import { registerFileCommand } from "./commands/file";
 import { registerCheckCommand } from "./commands/check";
 import { registerInstallHookCommand } from "./commands/install-hook";
 import { registerBaselineCommand } from "./commands/baseline";
+import { registerInspectCommand } from "./commands/inspect";
 
 loadDotEnv(path.join(__dirname, ".."));
 
@@ -33,8 +34,9 @@ program
     `
 Quick start:
   $ cambium scan ./my-repo                 # fast, free, no LLM
-  $ cambium drift ./my-repo --top 3         # LLM-explained, slower
-  $ cambium install-hook .                  # auto-check on every commit
+  $ cambium inspect ./src/my-file.ts       # breakdown of complex functions
+  $ cambium drift ./my-repo --top 3        # LLM-explained, slower
+  $ cambium install-hook .                 # auto-check on every commit
 
 Run 'cambium <command> --help' for that command's full options
 (each command has its own flags — see e.g. 'cambium drift --help').`
@@ -43,6 +45,7 @@ Run 'cambium <command> --help' for that command's full options
 registerScanCommand(program);
 registerDriftCommand(program);
 registerFileCommand(program);
+registerInspectCommand(program);
 registerCheckCommand(program);
 registerInstallHookCommand(program);
 registerBaselineCommand(program);

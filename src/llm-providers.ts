@@ -27,7 +27,7 @@ async function callAnthropic(
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: provider.model ?? "claude-sonnet-5",
+      model: provider.model ?? "claude-3-5-sonnet-latest",
       max_tokens: 1500,
       temperature: 0,
       system: SYSTEM_PROMPT,
@@ -46,6 +46,54 @@ async function callAnthropic(
 
   const parsed = parseModelJson(textBlock.text);
   const validated = validateDriftAnalysis(parsed, textBlock.text, exportedSymbols, importedSymbolNames);
+  return { filePath, ...validated };
+}
+
+async function callGemini(
+  provider: { apiKey: string; model?: string },
+  filePath: string,
+  exportedSymbols: string[],
+  source: string,
+  touchCount: number | null,
+  importedSymbolNames: string[]
+): Promise<DriftAnalysis> {
+  const userPrompt = buildUserPrompt(filePath, exportedSymbols, source, touchCount);
+  const model = provider.model ?? "gemini-2.0-flash";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${provider.apiKey}`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{ text: SYSTEM_PROMPT }],
+      },
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: userPrompt }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0,
+        responseMimeType: "application/json",
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Gemini API error ${response.status}: ${errText}`);
+  }
+
+  const data = (await response.json()) as any;
+  const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!rawText) throw new Error("No text content in Gemini response");
+
+  const parsed = parseModelJson(rawText);
+  const validated = validateDriftAnalysis(parsed, rawText, exportedSymbols, importedSymbolNames);
   return { filePath, ...validated };
 }
 
@@ -125,6 +173,9 @@ export async function callLLM(
 ): Promise<DriftAnalysis> {
   if (provider.kind === "anthropic") {
     return callAnthropic(provider, filePath, exportedSymbols, source, touchCount, importedSymbolNames);
+  }
+  if (provider.kind === "gemini") {
+    return callGemini(provider, filePath, exportedSymbols, source, touchCount, importedSymbolNames);
   }
   return callOllama(provider, filePath, exportedSymbols, source, touchCount, importedSymbolNames);
 }

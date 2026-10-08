@@ -4,29 +4,52 @@ import * as path from "path";
 import { scanRepo } from "../scan-repo";
 import { getTouchFrequency } from "../git-history";
 import { attachTouchFrequency, computeOutlierScore } from "../scoring";
-import { analyzeDrift, LLMProvider, DriftAnalysis } from "../analyze-drift";
+import {
+  analyzeDrift,
+  LLMProvider,
+  DriftAnalysis,
+  buildEmittedPrompts,
+  emitPromptsToDirectory,
+  evaluateExternalAnalysis,
+} from "../analyze-drift";
 import { formatDriftReportMarkdown } from "../report";
 import { isTestFile } from "../test-file-detection";
 import { normalizePathKey, toForwardSlashes } from "../git-paths";
 
 function resolveProvider(): LLMProvider {
-  const forced = process.env.LLM_PROVIDER; // "anthropic" | "ollama"
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const forced = process.env.LLM_PROVIDER; // "anthropic" | "gemini" | "ollama"
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const geminiKey = process.env.GEMINI_API_KEY;
 
-  if (forced === "ollama" || (!forced && !apiKey)) {
+  if (forced === "gemini" || (!forced && geminiKey && !anthropicKey)) {
+    if (!geminiKey) {
+      console.error("LLM_PROVIDER=gemini but GEMINI_API_KEY is not set.");
+      process.exit(1);
+    }
     return {
-      kind: "ollama",
-      baseUrl: process.env.OLLAMA_BASE_URL,
-      model: process.env.OLLAMA_MODEL,
+      kind: "gemini",
+      apiKey: geminiKey,
+      model: process.env.GEMINI_MODEL ?? "gemini-2.0-flash",
     };
   }
 
-  if (!apiKey) {
-    console.error("LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set.");
-    process.exit(1);
+  if (forced === "anthropic" || (!forced && anthropicKey)) {
+    if (!anthropicKey) {
+      console.error("LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set.");
+      process.exit(1);
+    }
+    return {
+      kind: "anthropic",
+      apiKey: anthropicKey,
+      model: process.env.ANTHROPIC_MODEL ?? "claude-3-5-sonnet-latest",
+    };
   }
 
-  return { kind: "anthropic", apiKey, model: process.env.ANTHROPIC_MODEL };
+  return {
+    kind: "ollama",
+    baseUrl: process.env.OLLAMA_BASE_URL,
+    model: process.env.OLLAMA_MODEL,
+  };
 }
 
 function printDriftSummary(analyses: DriftAnalysis[]) {
@@ -63,6 +86,48 @@ function printDriftSummary(analyses: DriftAnalysis[]) {
   }
 }
 
+function renderAnalysesResult(
+  analyses: DriftAnalysis[],
+  opts: { json?: boolean; output?: string },
+  repoPath: string
+) {
+  printDriftSummary(analyses);
+
+  if (opts.json) {
+    console.log(JSON.stringify(analyses, null, 2));
+  } else {
+    for (const a of analyses) {
+      const shortName = a.filePath.split(/[\\/]/).pop();
+      console.log(`\n${"=".repeat(60)}`);
+      console.log(`${shortName}`);
+      console.log("=".repeat(60));
+      if (a.inferredOriginalPurpose === "ERROR") {
+        console.log(`Analysis failed: ${a.driftSummary}`);
+        continue;
+      }
+      console.log(`\nOriginal purpose: ${a.inferredOriginalPurpose}`);
+      console.log(`\nCurrent responsibilities:`);
+      for (const r of a.currentResponsibilities) console.log(`  - ${r}`);
+      console.log(`\nDrifted: ${a.hasDrifted ? "YES" : "no"}`);
+      console.log(`${a.driftSummary}`);
+      if (a.suggestedSplit) {
+        console.log(`\nSuggested split:`);
+        for (const s of a.suggestedSplit) {
+          console.log(`  ${s.newFileName} — ${s.responsibility}`);
+          console.log(`    exports: ${s.movedExports.join(", ")}`);
+        }
+      }
+    }
+    console.log("");
+  }
+
+  if (opts.output) {
+    const markdown = formatDriftReportMarkdown(analyses, repoPath);
+    fs.writeFileSync(opts.output, markdown, "utf-8");
+    console.error(`Report saved to ${opts.output}`);
+  }
+}
+
 export function registerDriftCommand(program: Command): void {
   program
     .command("drift")
@@ -94,6 +159,16 @@ export function registerDriftCommand(program: Command): void {
         "entirely — use this to target a specific file (e.g. the 2nd-ranked one from " +
         "'cambium scan') without re-analyzing everything ranked above it"
     )
+    .option("--ignore <pattern...>", "one or more glob patterns to ignore (e.g. 'src/data/**')")
+    .option("--no-ignore-file", "do not read .cambiumignore file")
+    .option(
+      "--emit-prompts [dir]",
+      "emit drift analysis prompts (to directory or stdout if --json) without calling an LLM"
+    )
+    .option(
+      "--eval <path>",
+      "evaluate external JSON analysis results against Cambium guardrails and produce reports"
+    )
     .action(
       async (
         repoPath: string,
@@ -105,41 +180,70 @@ export function registerDriftCommand(program: Command): void {
           output?: string;
           excludeTests?: boolean;
           file?: string;
+          ignore?: string[];
+          ignoreFile?: boolean;
+          emitPrompts?: boolean | string;
+          eval?: string;
         }
       ) => {
-        const provider = resolveProvider();
-        console.error(
-          `Using LLM provider: ${provider.kind}` +
-            (provider.kind === "ollama" ? ` (${provider.model ?? "qwen2.5-coder:latest"})` : "")
-        );
-        console.error(`Scanning ${repoPath} ...`);
+        if (!opts.json) {
+          console.error(`Scanning ${repoPath} ...`);
+        }
 
         let rawResults;
         try {
-          rawResults = scanRepo(repoPath);
+          rawResults = scanRepo(repoPath, {
+            ignorePatterns: opts.ignore,
+            useCambiumIgnore: opts.ignoreFile,
+          });
         } catch (err) {
           console.error(`Error: ${(err as Error).message}`);
           process.exit(1);
         }
-        console.error(`Found ${rawResults.length} file(s).`);
+        if (!opts.json) {
+          console.error(`Found ${rawResults.length} file(s).`);
+        }
+
+        // --- Handle External Evaluation Ingestion Mode ---
+        if (opts.eval) {
+          let evalContent: string;
+          try {
+            evalContent = fs.readFileSync(opts.eval, "utf-8");
+          } catch (err) {
+            console.error(`Error reading evaluation file ${opts.eval}: ${(err as Error).message}`);
+            process.exit(1);
+          }
+
+          let parsedEval: any;
+          try {
+            parsedEval = JSON.parse(evalContent);
+          } catch (err) {
+            console.error(`Error parsing JSON in ${opts.eval}: ${(err as Error).message}`);
+            process.exit(1);
+          }
+
+          const analyses = evaluateExternalAnalysis(parsedEval, rawResults, repoPath);
+          renderAnalysesResult(analyses, opts, repoPath);
+          return;
+        }
 
         if (opts.excludeTests) {
           const beforeCount = rawResults.length;
           rawResults = rawResults.filter((m) => !isTestFile(m.filePath));
           const excluded = beforeCount - rawResults.length;
-          if (excluded > 0) {
+          if (excluded > 0 && !opts.json) {
             console.error(`Excluding ${excluded} test file(s) (--exclude-tests).`);
           }
         }
 
         const touchFrequency = getTouchFrequency(repoPath);
-        if (touchFrequency === null) {
+        if (touchFrequency === null && !opts.json) {
           console.error(`(no git history found — touch-frequency signal unavailable)`);
         }
         const results = attachTouchFrequency(rawResults, touchFrequency);
 
         const brokenFiles = results.filter((m) => m.hasSyntaxErrors);
-        if (brokenFiles.length > 0) {
+        if (brokenFiles.length > 0 && !opts.json) {
           console.error(
             `\n⚠ Excluding ${brokenFiles.length} file(s) with syntax errors — their metrics ` +
               `aren't trustworthy, so they're not eligible for drift analysis:`
@@ -179,7 +283,9 @@ export function registerDriftCommand(program: Command): void {
             process.exit(1);
           }
 
-          console.error(`Targeting exactly one file (--file): ${opts.file}`);
+          if (!opts.json) {
+            console.error(`Targeting exactly one file (--file): ${opts.file}`);
+          }
           top = [match];
         } else {
           const sorted = [...parseable].sort(
@@ -190,11 +296,6 @@ export function registerDriftCommand(program: Command): void {
           const minLines = parseInt(opts.minLines, 10);
           const minComplexity = parseInt(opts.minComplexity, 10);
 
-          // Skip files that are too small to be worth SPLITTING INTO MULTIPLE
-          // FILES, regardless of internal complexity. A 36-line function can
-          // be messy (worth simplifying) without being a candidate for
-          // decomposition into separate modules — that only makes sense once
-          // a file is both long enough AND complex enough to warrant it.
           top = candidates.filter(
             (m) => m.lines >= minLines && m.cyclomaticComplexity >= minComplexity
           );
@@ -202,7 +303,7 @@ export function registerDriftCommand(program: Command): void {
             (m) => !(m.lines >= minLines && m.cyclomaticComplexity >= minComplexity)
           );
 
-          if (skipped.length > 0) {
+          if (skipped.length > 0 && !opts.json) {
             console.error(
               `\nSkipping ${skipped.length} file(s) too small to warrant a multi-file split ` +
                 `(need >= ${minLines} lines AND >= complexity ${minComplexity}):`
@@ -215,57 +316,64 @@ export function registerDriftCommand(program: Command): void {
         }
 
         if (top.length === 0) {
-          console.error(`\nNo files met the threshold for drift analysis. Nothing to do.`);
+          if (!opts.json) {
+            console.error(`\nNo files met the threshold for drift analysis. Nothing to do.`);
+          }
           return;
         }
 
-        console.error(`\nRunning LLM drift analysis on top ${top.length} outlier file(s):`);
-        if (provider.kind === "ollama") {
+        // --- Handle Prompt Emission Mode ---
+        if (opts.emitPrompts) {
+          const emittedPrompts = buildEmittedPrompts(top, repoPath);
+
+          if (opts.json) {
+            console.log(JSON.stringify(emittedPrompts, null, 2));
+            if (opts.output) {
+              fs.writeFileSync(opts.output, JSON.stringify(emittedPrompts, null, 2), "utf-8");
+              console.error(`Emitted prompts JSON saved to ${opts.output}`);
+            }
+          } else {
+            const targetDir =
+              typeof opts.emitPrompts === "string"
+                ? opts.emitPrompts
+                : path.join(repoPath, ".cambium", "prompts");
+            const written = emitPromptsToDirectory(emittedPrompts, targetDir);
+            console.log(`\nEmitted ${written.length} prompt(s) to ${targetDir}:`);
+            for (const w of written) {
+              console.log(`  - ${path.relative(repoPath, w)}`);
+            }
+            if (opts.output) {
+              fs.writeFileSync(opts.output, JSON.stringify(emittedPrompts, null, 2), "utf-8");
+              console.error(`Emitted prompts JSON saved to ${opts.output}`);
+            }
+          }
+          return;
+        }
+
+        // --- Live LLM Inference Mode ---
+        const provider = resolveProvider();
+        if (!opts.json) {
           console.error(
-            "(local inference — each file may take anywhere from a few seconds to several minutes depending on your hardware)"
+            `Using LLM provider: ${provider.kind}` +
+              (provider.kind === "ollama" ? ` (${provider.model ?? "qwen2.5-coder:latest"})` : "")
           );
+          console.error(`\nRunning LLM drift analysis on top ${top.length} outlier file(s):`);
+          if (provider.kind === "ollama") {
+            console.error(
+              "(local inference — each file may take anywhere from a few seconds to several minutes depending on your hardware)"
+            );
+          }
         }
 
         const started = Date.now();
         const analyses = await analyzeDrift(top, provider);
         const elapsed = ((Date.now() - started) / 1000).toFixed(1);
 
-        printDriftSummary(analyses);
-        console.error(`Total time: ${elapsed}s\n`);
-
-        if (opts.json) {
-          console.log(JSON.stringify(analyses, null, 2));
-        } else {
-          for (const a of analyses) {
-            const shortName = a.filePath.split(/[\\/]/).pop();
-            console.log(`\n${"=".repeat(60)}`);
-            console.log(`${shortName}`);
-            console.log("=".repeat(60));
-            if (a.inferredOriginalPurpose === "ERROR") {
-              console.log(`Analysis failed: ${a.driftSummary}`);
-              continue;
-            }
-            console.log(`\nOriginal purpose: ${a.inferredOriginalPurpose}`);
-            console.log(`\nCurrent responsibilities:`);
-            for (const r of a.currentResponsibilities) console.log(`  - ${r}`);
-            console.log(`\nDrifted: ${a.hasDrifted ? "YES" : "no"}`);
-            console.log(`${a.driftSummary}`);
-            if (a.suggestedSplit) {
-              console.log(`\nSuggested split:`);
-              for (const s of a.suggestedSplit) {
-                console.log(`  ${s.newFileName} — ${s.responsibility}`);
-                console.log(`    exports: ${s.movedExports.join(", ")}`);
-              }
-            }
-          }
-          console.log("");
+        if (!opts.json) {
+          console.error(`Total time: ${elapsed}s\n`);
         }
 
-        if (opts.output) {
-          const markdown = formatDriftReportMarkdown(analyses, repoPath);
-          fs.writeFileSync(opts.output, markdown, "utf-8");
-          console.error(`Report saved to ${opts.output}`);
-        }
+        renderAnalysesResult(analyses, opts, repoPath);
       }
     );
 }

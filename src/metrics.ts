@@ -13,16 +13,11 @@ export interface FileMetrics {
 }
 
 /**
- * Cyclomatic complexity, computed the standard way:
- * start at 1, add 1 for every branch/decision point in the file.
- * Branch points: if, for, while, do-while, case, catch, ternary,
- * logical && / ||, and optional chaining (?.) with a fallback.
- *
- * This is a whole-file complexity score (sum across all functions),
- * which is what we want for "is this file doing too much" rather
- * than per-function complexity.
+ * Cyclomatic complexity for any AST node or subtree (Function, Method, or SourceFile).
+ * Starts at 1, adds 1 for every branch/decision point:
+ * if, for, while, do-while, case, catch, ternary, and logical && / || / ??.
  */
-function computeCyclomaticComplexity(sourceFile: SourceFile): number {
+export function computeNodeComplexity(node: Node): number {
   let complexity = 1;
 
   const branchKinds = new Set([
@@ -37,17 +32,17 @@ function computeCyclomaticComplexity(sourceFile: SourceFile): number {
     SyntaxKind.ConditionalExpression, // ternary
   ]);
 
-  sourceFile.forEachDescendant((node) => {
-    const kind = node.getKind();
+  node.forEachDescendant((child) => {
+    const kind = child.getKind();
 
     if (branchKinds.has(kind)) {
       complexity++;
       return;
     }
 
-    // Logical && / || each add a decision point
-    if (Node.isBinaryExpression(node)) {
-      const op = node.getOperatorToken().getKind();
+    // Logical && / || / ?? each add a decision point
+    if (Node.isBinaryExpression(child)) {
+      const op = child.getOperatorToken().getKind();
       if (
         op === SyntaxKind.AmpersandAmpersandToken ||
         op === SyntaxKind.BarBarToken ||
@@ -59,6 +54,18 @@ function computeCyclomaticComplexity(sourceFile: SourceFile): number {
   });
 
   return complexity;
+}
+
+/**
+ * Cyclomatic complexity, computed the standard way:
+ * start at 1, add 1 for every branch/decision point in the file.
+ *
+ * This is a whole-file complexity score (sum across all functions),
+ * which is what we want for "is this file doing too much" rather
+ * than per-function complexity.
+ */
+function computeCyclomaticComplexity(sourceFile: SourceFile): number {
+  return computeNodeComplexity(sourceFile);
 }
 
 /**
