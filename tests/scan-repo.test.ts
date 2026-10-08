@@ -65,4 +65,55 @@ describe("scanRepo — path validation", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("excludes files matching patterns in .cambiumignore", () => {
+    const dir = path.join(os.tmpdir(), `cambium-test-cambiumignore-${Date.now()}`);
+    fs.mkdirSync(path.join(dir, "src/data"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".cambiumignore"), "src/data/**\n# comment\n*.gen.ts\n");
+    fs.writeFileSync(path.join(dir, "src/data/curriculum.ts"), "export const data = {};");
+    fs.writeFileSync(path.join(dir, "src/api.gen.ts"), "export const api = {};");
+    fs.writeFileSync(path.join(dir, "src/index.ts"), "export const main = 1;");
+
+    try {
+      const results = scanRepo(dir);
+      expect(results).toHaveLength(1);
+      expect(results[0].filePath).toContain("src");
+      expect(results[0].filePath).toContain("index.ts");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("excludes files matching custom ignorePatterns option", () => {
+    const dir = path.join(os.tmpdir(), `cambium-test-customignore-${Date.now()}`);
+    fs.mkdirSync(path.join(dir, "fixtures"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "fixtures/mock.ts"), "export const mock = {};");
+    fs.writeFileSync(path.join(dir, "app.ts"), "export const app = {};");
+
+    try {
+      const results = scanRepo(dir, { ignorePatterns: ["fixtures/**"] });
+      expect(results).toHaveLength(1);
+      expect(results[0].filePath).toContain("app.ts");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("excludes files containing the inline @cambium-ignore pragma", () => {
+    const dir = path.join(os.tmpdir(), `cambium-test-pragma-${Date.now()}`);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "dict.ts"),
+      "// @cambium-ignore\nexport const giantLookup = { a: 1, b: 2 };"
+    );
+    fs.writeFileSync(path.join(dir, "active.ts"), "export function active() { return 1; }");
+
+    try {
+      const results = scanRepo(dir);
+      expect(results).toHaveLength(1);
+      expect(results[0].filePath).toContain("active.ts");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
